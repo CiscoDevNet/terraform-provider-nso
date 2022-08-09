@@ -1,0 +1,57 @@
+---
+name: Device
+path: tailf-ncs:devices/device=%v
+res_description: This resource can manage the Device configuration.
+ds_description: This data source can read the Device configuration.
+no_augment_config: true
+doc_category: Device
+attributes:
+  - yang_name: name
+    tf_name: name
+    id: true
+    type: String
+    description: A string uniquely identifying the managed device.
+    example: test-device01
+  - yang_name: address-choice/device/address
+    xpath: address
+    tf_name: address
+    type: String
+    description: IP address or host name for the management interface on the device.
+    example: 10.1.1.1
+  - yang_name: address-choice/device/port
+    xpath: port
+    tf_name: port
+    type: Int64
+    description: Port for the management interface on the device. If this leaf is not configured, NCS will use a default value based on the type of device. For example, a NETCONF device uses port 830, a CLI device over SSH uses port 22, and an SNMP device uses port 161.
+    min_int: 0
+    max_int: 65535
+    example: 22
+  - yang_name: authgroup
+    tf_name: authgroup
+    type: String
+    description: The authentication credentials used when connecting to this managed device.
+    example: default
+  - yang_name: state/admin-state
+    tf_name: admin_state
+    type: String
+    description: Administrative state.
+    enum_values:
+      - locked
+      - unlocked
+      - southbound-locked
+      - config-locked
+      - call-home
+    example: locked
+  - yang_name: device-type/ne-type/netconf/netconf/ned-id
+    xpath: device-type/netconf/ned-id
+    tf_name: netconf_net_id
+    type: String
+    description: NETCONF NED ID.
+    exclude_test: true
+    example: cisco-iosxr-nc-7.6:cisco-iosxr-nc-7.6
+  - yang_name: device-type/ne-type/cli/cli/ned-id
+    xpath: device-type/cli/ned-id
+    tf_name: cli_ned_id
+    type: String
+    description: CLI NED ID.
+    example: cisco-ios-cli-3.0:cisco-ios-cli-3.0

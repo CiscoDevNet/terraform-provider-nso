@@ -1,0 +1,23 @@
+
+---
+layout: ""
+page_title: "Provider: NSO"
+description: |-
+  The NSO provider provides resources to interact with one or more Cisco NSO (Network Sevices Orchestrator) instances.
+---
+
+# NSO Provider
+
+The NSO provider provides resources to interact with one or more Cisco NSO (Network Sevices Orchestrator) instances.
+
+The following example repositories exist to demonstrate the use of the provider:
+
+- [MPLS VPN Service Example](https://github.com/netascode/terraform-nso-service-example)
+
+It communicates with NSO instances via RESTCONF, which requires the RESTCONF API to be enabled in `ncs.conf`.
+
+## Example Usage
+
+{{tffile "examples/provider/provider.tf"}}
+
+{{ .SchemaMarkdown | trimspace }}

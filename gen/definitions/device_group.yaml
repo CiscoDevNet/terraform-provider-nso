@@ -1,0 +1,27 @@
+---
+name: Device Group
+path: tailf-ncs:devices/device-group=%v
+res_description: This resource can manage the Device Group configuration.
+ds_description: This data source can read the Device Group configuration.
+no_augment_config: true
+doc_category: Device
+attributes:
+  - yang_name: name
+    tf_name: name
+    id: true
+    type: String
+    description: Device group name.
+    example: test-group1
+  - yang_name: device-name
+    tf_name: device_names
+    type: List
+    list_element: String
+    description: A list of device names.
+    example: '["c1"]'
+  - yang_name: device-group
+    tf_name: device_groups
+    type: List
+    list_element: String
+    description: A list of device groups.
+    exclude_test: true
+    example: '["group1"]'
