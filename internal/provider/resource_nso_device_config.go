@@ -62,7 +62,7 @@ func (t resourceDeviceConfigType) GetSchema(ctx context.Context) (tfsdk.Schema, 
 			},
 			"attributes": {
 				Type:                types.MapType{ElemType: types.StringType},
-				MarkdownDescription: "Map of key-value pairs which represents the attributes and its values.",
+				MarkdownDescription: "Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.",
 				Optional:            true,
 				Computed:            true,
 			},
@@ -71,7 +71,7 @@ func (t resourceDeviceConfigType) GetSchema(ctx context.Context) (tfsdk.Schema, 
 				Optional:            true,
 				Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
 					"name": {
-						MarkdownDescription: "YANG list name.",
+						MarkdownDescription: "YANG list name. Nested lists (in YANG containers) can be specified using `/` as delimiter.",
 						Type:                types.StringType,
 						Required:            true,
 					},
@@ -86,7 +86,7 @@ func (t resourceDeviceConfigType) GetSchema(ctx context.Context) (tfsdk.Schema, 
 						Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
 							"attributes": {
 								Type:                types.MapType{ElemType: types.StringType},
-								MarkdownDescription: "Map of key-value pairs which represents the attributes and its values.",
+								MarkdownDescription: "Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.",
 								Optional:            true,
 								Computed:            true,
 							},

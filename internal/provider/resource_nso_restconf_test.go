@@ -43,6 +43,12 @@ func TestAccNsoRestconf(t *testing.T) {
 					resource.TestCheckResourceAttr("nso_restconf.nested", "lists.0.items.0.attributes.id", "123"),
 				),
 			},
+			{
+				Config: testAccNsoRestconfConfig_nested_attribute(),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("nso_restconf.nested_attribute", "attributes.global-settings/connect-timeout", "25"),
+				),
+			},
 		},
 	})
 }
@@ -83,6 +89,18 @@ func testAccNsoRestconfConfig_nested() string {
 				]
 			}
 		]
+	}
+	`
+}
+
+func testAccNsoRestconfConfig_nested_attribute() string {
+	return `
+	resource "nso_restconf" "nested_attribute" {
+		path = "tailf-ncs:devices"
+		delete = false
+		attributes = {
+			"global-settings/connect-timeout" = 25
+		}
 	}
 	`
 }

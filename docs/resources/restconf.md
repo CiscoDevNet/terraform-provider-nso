@@ -60,7 +60,7 @@ resource "nso_restconf" "device_group" {
 
 ### Optional
 
-- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values.
+- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.
 - `delete` (Boolean) Delete object during destroy operation. Default value is `true`.
 - `instance` (String) An instance name from the provider configuration.
 - `lists` (Attributes List) YANG lists. (see [below for nested schema](#nestedatt--lists))
@@ -74,7 +74,7 @@ resource "nso_restconf" "device_group" {
 
 Required:
 
-- `name` (String) YANG list name.
+- `name` (String) YANG list name. Nested lists (in YANG containers) can be specified using `/` as delimiter.
 
 Optional:
 
@@ -87,7 +87,7 @@ Optional:
 
 Optional:
 
-- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values.
+- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.
 
 ## Import
 
