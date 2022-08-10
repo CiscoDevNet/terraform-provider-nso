@@ -7,7 +7,7 @@ description: |-
 
 # Changelog
 
-## 0.1.1 (unreleased)
+## 0.1.1
 
 - Add option to specify nested attributes (YANG containers) to nso_restconf and nso_device_config resources
 
