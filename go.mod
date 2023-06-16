@@ -8,9 +8,9 @@ require (
 	github.com/hashicorp/terraform-plugin-go v0.13.0
 	github.com/hashicorp/terraform-plugin-log v0.7.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.20.0
-	github.com/netascode/go-restconf v0.1.7
+	github.com/netascode/go-restconf v0.1.9
 	github.com/openconfig/goyang v1.1.0
-	github.com/tidwall/gjson v1.14.2
+	github.com/tidwall/gjson v1.14.4
 	github.com/tidwall/sjson v1.2.5
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -65,7 +65,7 @@ require (
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.0 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
 	github.com/vmihailenco/msgpack/v4 v4.3.12 // indirect
 	github.com/vmihailenco/tagparser v0.1.1 // indirect
