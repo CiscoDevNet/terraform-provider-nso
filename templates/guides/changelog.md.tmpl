@@ -7,7 +7,7 @@ description: |-
 
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0
 
 - Migrate to `CiscoDevNet` registry namespace
 - BREAKING CHANGE: Remove `attributes` map of list items in `nso_restconf` resource
