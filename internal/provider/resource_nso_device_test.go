@@ -21,7 +21,7 @@ func TestAccNsoDevice(t *testing.T) {
 					resource.TestCheckResourceAttr("nso_device.test", "port", "22"),
 					resource.TestCheckResourceAttr("nso_device.test", "authgroup", "default"),
 					resource.TestCheckResourceAttr("nso_device.test", "admin_state", "locked"),
-					resource.TestCheckResourceAttr("nso_device.test", "cli_ned_id", "cisco-ios-cli-3.0:cisco-ios-cli-3.0"),
+					resource.TestCheckResourceAttr("nso_device.test", "cli_ned_id", "cisco-ios-cli-3.8:cisco-ios-cli-3.8"),
 				),
 			},
 			{
@@ -49,7 +49,7 @@ func testAccNsoDeviceConfig_all() string {
 		port = 22
 		authgroup = "default"
 		admin_state = "locked"
-		cli_ned_id = "cisco-ios-cli-3.0:cisco-ios-cli-3.0"
+		cli_ned_id = "cisco-ios-cli-3.8:cisco-ios-cli-3.8"
 	}
 	`
 }

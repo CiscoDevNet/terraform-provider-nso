@@ -86,9 +86,9 @@ func (d *DeviceConfigDataSource) Read(ctx context.Context, req datasource.ReadRe
 		return
 	}
 
-	path := "tailf-ncs:devices/device=" + config.Instance.ValueString() + "/config"
+	path := "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config"
 	if config.Path.ValueString() != "" {
-		path = "tailf-ncs:devices/device=" + config.Instance.ValueString() + "/config/" + config.Path.ValueString()
+		path = "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config/" + config.Path.ValueString()
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", path))

@@ -17,7 +17,7 @@ func TestAccNsoDeviceGroup(t *testing.T) {
 				Config: testAccNsoDeviceGroupConfig_all(),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("nso_device_group.test", "name", "test-group1"),
-					resource.TestCheckResourceAttr("nso_device_group.test", "device_names.0", "c1"),
+					resource.TestCheckResourceAttr("nso_device_group.test", "device_names.0", "ce0"),
 				),
 			},
 			{
@@ -41,7 +41,7 @@ func testAccNsoDeviceGroupConfig_all() string {
 	return `
 	resource "nso_device_group" "test" {
 		name = "test-group1"
-		device_names = ["c1"]
+		device_names = ["ce0"]
 	}
 	`
 }

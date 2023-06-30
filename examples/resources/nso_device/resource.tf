@@ -4,5 +4,5 @@ resource "nso_device" "example" {
   port        = 22
   authgroup   = "default"
   admin_state = "locked"
-  cli_ned_id  = "cisco-ios-cli-3.0:cisco-ios-cli-3.0"
+  cli_ned_id  = "cisco-ios-cli-3.8:cisco-ios-cli-3.8"
 }

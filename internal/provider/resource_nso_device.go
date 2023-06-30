@@ -49,13 +49,6 @@ func (r *DeviceResource) Schema(ctx context.Context, req resource.SchemaRequest,
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"delete_mode": schema.StringAttribute{
-				MarkdownDescription: helpers.NewAttributeDescription("Configure behavior when deleting/destroying the resource. Either delete the entire object (YANG container) being managed, or only delete the individual resource attributes configured explicitly and leave everything else as-is. Default value is `all`.").AddStringEnumDescription("all", "attributes").String,
-				Optional:            true,
-				Validators: []validator.String{
-					stringvalidator.OneOf("all", "attributes"),
-				},
-			},
 			"name": schema.StringAttribute{
 				MarkdownDescription: helpers.NewAttributeDescription("A string uniquely identifying the managed device.").String,
 				Required:            true,
@@ -292,11 +285,6 @@ func (r *DeviceResource) Delete(ctx context.Context, req resource.DeleteRequest,
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.Id.ValueString()))
 	deleteMode := "all"
-	if state.DeleteMode.ValueString() == "all" {
-		deleteMode = "all"
-	} else if state.DeleteMode.ValueString() == "attributes" {
-		deleteMode = "attributes"
-	}
 
 	if deleteMode == "all" {
 		res, err := r.clients[state.Instance.ValueString()].DeleteData(state.Id.ValueString())

@@ -4,6 +4,7 @@ path: tailf-ncs:devices/device=%v
 res_description: This resource can manage the Device configuration.
 ds_description: This data source can read the Device configuration.
 no_augment_config: true
+no_delete_attributes: true
 doc_category: Device
 attributes:
   - yang_name: name
@@ -54,4 +55,4 @@ attributes:
     tf_name: cli_ned_id
     type: String
     description: CLI NED ID.
-    example: cisco-ios-cli-3.0:cisco-ios-cli-3.0
+    example: cisco-ios-cli-3.8:cisco-ios-cli-3.8

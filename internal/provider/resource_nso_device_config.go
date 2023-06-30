@@ -57,7 +57,7 @@ func (r *DeviceConfigResource) Schema(ctx context.Context, req resource.SchemaRe
 			},
 			"path": schema.StringAttribute{
 				MarkdownDescription: "A RESTCONF path.",
-				Required:            true,
+				Optional:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -139,7 +139,7 @@ func (r *DeviceConfigResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	plan.Id = plan.Path
+	plan.Id = types.StringValue(plan.getPath())
 
 	if plan.Attributes.IsUnknown() {
 		plan.Attributes = types.MapNull(types.StringType)

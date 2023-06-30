@@ -16,7 +16,7 @@ func TestAccDataSourceNsoDeviceGroup(t *testing.T) {
 			{
 				Config: testAccDataSourceNsoDeviceGroupConfig,
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("data.nso_device_group.test", "device_names.0", "c1"),
+					resource.TestCheckResourceAttr("data.nso_device_group.test", "device_names.0", "ce0"),
 				),
 			},
 		},
@@ -26,9 +26,8 @@ func TestAccDataSourceNsoDeviceGroup(t *testing.T) {
 const testAccDataSourceNsoDeviceGroupConfig = `
 
 resource "nso_device_group" "test" {
-	delete_mode = "attributes"
 	name = "test-group1"
-	device_names = ["c1"]
+	device_names = ["ce0"]
 }
 
 data "nso_device_group" "test" {

@@ -17,7 +17,6 @@ import (
 type DeviceGroup struct {
 	Instance     types.String `tfsdk:"instance"`
 	Id           types.String `tfsdk:"id"`
-	DeleteMode   types.String `tfsdk:"delete_mode"`
 	Name         types.String `tfsdk:"name"`
 	DeviceNames  types.List   `tfsdk:"device_names"`
 	DeviceGroups types.List   `tfsdk:"device_groups"`

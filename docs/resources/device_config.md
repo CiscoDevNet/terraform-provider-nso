@@ -47,7 +47,6 @@ resource "nso_device_config" "access_list" {
 ### Required
 
 - `device` (String) An NSO device name.
-- `path` (String) A RESTCONF path.
 
 ### Optional
 
@@ -55,6 +54,7 @@ resource "nso_device_config" "access_list" {
 - `delete` (Boolean) Delete object during destroy operation. Default value is `true`.
 - `instance` (String) An instance name from the provider configuration.
 - `lists` (Attributes List) YANG lists. (see [below for nested schema](#nestedatt--lists))
+- `path` (String) A RESTCONF path.
 
 ### Read-Only
 

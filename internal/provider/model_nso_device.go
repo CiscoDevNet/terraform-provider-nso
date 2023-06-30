@@ -18,7 +18,6 @@ import (
 type Device struct {
 	Instance     types.String `tfsdk:"instance"`
 	Id           types.String `tfsdk:"id"`
-	DeleteMode   types.String `tfsdk:"delete_mode"`
 	Name         types.String `tfsdk:"name"`
 	Address      types.String `tfsdk:"address"`
 	Port         types.Int64  `tfsdk:"port"`

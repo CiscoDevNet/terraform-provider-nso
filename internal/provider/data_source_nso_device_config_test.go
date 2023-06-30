@@ -14,7 +14,7 @@ func TestAccDataSourceNsoDeviceConfig(t *testing.T) {
 			{
 				Config: testAccDataSourceNsoDeviceConfigConfig,
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("data.nso_device_config.test", "id", "tailf-ncs:devices/device=c1/config"),
+					resource.TestCheckResourceAttr("data.nso_device_config.test", "id", "tailf-ncs:devices/device=ce0/config"),
 					resource.TestCheckResourceAttr("data.nso_device_config.test", "attributes.tailf-ned-cisco-ios:hostname", "R1"),
 				),
 			},
@@ -24,14 +24,14 @@ func TestAccDataSourceNsoDeviceConfig(t *testing.T) {
 
 const testAccDataSourceNsoDeviceConfigConfig = `
 resource "nso_device_config" "test" {
-	device = "c1"
+	device = "ce0"
 	attributes = {
 		"tailf-ned-cisco-ios:hostname" = "R1"
 	}
 }
 
 data "nso_device_config" "test" {
-	device = "c1"
+	device = "ce0"
 	depends_on = [nso_device_config.test]
 }
 `

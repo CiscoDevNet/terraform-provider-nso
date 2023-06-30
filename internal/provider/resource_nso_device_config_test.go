@@ -15,20 +15,20 @@ func TestAccNsoDeviceConfig(t *testing.T) {
 			{
 				Config: testAccNsoDeviceConfigConfig_empty(),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("nso_device_config.test", "id", "tailf-ncs:devices/device=c1/config"),
+					resource.TestCheckResourceAttr("nso_device_config.test", "id", "tailf-ncs:devices/device=ce0/config"),
 				),
 			},
 			{
 				Config: testAccNsoDeviceConfigConfig_hostname("R1"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("nso_device_config.test", "id", "tailf-ncs:devices/device=c1/config"),
+					resource.TestCheckResourceAttr("nso_device_config.test", "id", "tailf-ncs:devices/device=ce0/config"),
 					resource.TestCheckResourceAttr("nso_device_config.test", "attributes.tailf-ned-cisco-ios:hostname", "R1"),
 				),
 			},
 			{
 				ResourceName:  "nso_device_config.test",
 				ImportState:   true,
-				ImportStateId: "tailf-ncs:devices/device=c1/config",
+				ImportStateId: "tailf-ncs:devices/device=ce0/config",
 			},
 			{
 				Config: testAccNsoDeviceConfigConfig_hostname("R2"),
@@ -39,8 +39,8 @@ func TestAccNsoDeviceConfig(t *testing.T) {
 			{
 				Config: testAccNsoDeviceConfigConfig_nested(),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.name", "rule"),
-					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.items.0.seq", "10"),
+					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.name", "std-access-list-rule"),
+					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.items.0.rule", "permit ip any"),
 				),
 			},
 		},
@@ -50,7 +50,7 @@ func TestAccNsoDeviceConfig(t *testing.T) {
 func testAccNsoDeviceConfigConfig_empty() string {
 	return `
 	resource "nso_device_config" "test" {
-		device = "c1"
+		device = "ce0"
 	}
 	`
 }
@@ -58,7 +58,7 @@ func testAccNsoDeviceConfigConfig_empty() string {
 func testAccNsoDeviceConfigConfig_hostname(hostname string) string {
 	return fmt.Sprintf(`
 	resource "nso_device_config" "test" {
-		device = "c1"
+		device = "ce0"
 		attributes = {
 			"tailf-ned-cisco-ios:hostname" = "%s"
 		}
@@ -69,18 +69,17 @@ func testAccNsoDeviceConfigConfig_hostname(hostname string) string {
 func testAccNsoDeviceConfigConfig_nested() string {
 	return `
 	resource "nso_device_config" "nested" {
-		device = "c1"
-		path = "tailf-ned-cisco-ios:access-list/access-list=1"
+		device = "ce0"
+		path = "tailf-ned-cisco-ios:access-list/access-list-standard-range=1"
 		attributes = {
-			id = 1
+			listnumber = 1
 		}
 		lists = [
 			{
-				name = "rule"
-				key = "seq"
+				name = "std-access-list-rule"
+				key = "rule"
 				items = [
 					{
-						seq = 10
 						rule = "permit ip any"
 					}
 				]
