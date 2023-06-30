@@ -32,10 +32,8 @@ resource "nso_device_config" "access_list" {
       key  = "seq"
       items = [
         {
-          attributes = {
-            seq  = 10
-            rule = "permit ip any"
-          }
+          seq  = 10
+          rule = "permit ip any"
         }
       ]
     }
@@ -49,14 +47,14 @@ resource "nso_device_config" "access_list" {
 ### Required
 
 - `device` (String) An NSO device name.
+- `path` (String) A RESTCONF path.
 
 ### Optional
 
-- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.
+- `attributes` (Map of String) Map of key-value pairs which represents the YANG leafs and its values.
 - `delete` (Boolean) Delete object during destroy operation. Default value is `true`.
 - `instance` (String) An instance name from the provider configuration.
 - `lists` (Attributes List) YANG lists. (see [below for nested schema](#nestedatt--lists))
-- `path` (String) A RESTCONF/YANG config path, e.g. `tailf-ned-cisco-ios:access-list/access-list=1`.
 
 ### Read-Only
 
@@ -67,20 +65,13 @@ resource "nso_device_config" "access_list" {
 
 Required:
 
-- `name` (String) YANG list name. Nested lists (in YANG containers) can be specified using `/` as delimiter.
+- `name` (String) YANG list name.
 
 Optional:
 
-- `items` (Attributes List) Items of YANG lists. (see [below for nested schema](#nestedatt--lists--items))
-- `key` (String) YANG list key attribute.
+- `items` (List of Map of String) List of maps of key-value pairs which represents the YANG leafs and its values.
+- `key` (String) YANG list key attribute. In case of multiple keys, those should be separated by a comma (`,`).
 - `values` (List of String) YANG leaf-list values.
-
-<a id="nestedatt--lists--items"></a>
-### Nested Schema for `lists.items`
-
-Optional:
-
-- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.
 
 ## Import
 

@@ -14,14 +14,12 @@ attributes:
     example: test-group1
   - yang_name: device-name
     tf_name: device_names
-    type: List
-    list_element: String
+    type: StringList
     description: A list of device names.
-    example: '["c1"]'
+    example: c1
   - yang_name: device-group
     tf_name: device_groups
-    type: List
-    list_element: String
+    type: StringList
     description: A list of device groups.
     exclude_test: true
-    example: '["group1"]'
+    example: group1

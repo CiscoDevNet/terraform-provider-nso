@@ -2,13 +2,12 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"strings"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/netascode/go-restconf"
-	"github.com/netascode/terraform-provider-nso/internal/provider/helpers"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -24,17 +23,13 @@ type DeviceConfig struct {
 }
 
 type DeviceConfigList struct {
-	Name   types.String           `tfsdk:"name"`
-	Key    types.String           `tfsdk:"key"`
-	Items  []DeviceConfigListItem `tfsdk:"items"`
-	Values types.List             `tfsdk:"values"`
+	Name   types.String `tfsdk:"name"`
+	Key    types.String `tfsdk:"key"`
+	Items  []types.Map  `tfsdk:"items"`
+	Values types.List   `tfsdk:"values"`
 }
 
-type DeviceConfigListItem struct {
-	Attributes types.Map `tfsdk:"attributes"`
-}
-
-type DeviceConfigDataSource struct {
+type DeviceConfigData struct {
 	Instance   types.String `tfsdk:"instance"`
 	Id         types.String `tfsdk:"id"`
 	Device     types.String `tfsdk:"device"`
@@ -43,10 +38,10 @@ type DeviceConfigDataSource struct {
 }
 
 func (data DeviceConfig) getPath() string {
-	if data.Path.Value != "" {
-		return "tailf-ncs:devices/device=" + data.Device.Value + "/config/" + data.Path.Value
+	if data.Path.ValueString() != "" {
+		return "tailf-ncs:devices/device=" + data.Device.ValueString() + "/config/" + data.Path.ValueString()
 	} else {
-		return "tailf-ncs:devices/device=" + data.Device.Value + "/config"
+		return "tailf-ncs:devices/device=" + data.Device.ValueString() + "/config"
 	}
 }
 
@@ -76,19 +71,19 @@ func (data DeviceConfig) toBody(ctx context.Context) string {
 		body, _ = sjson.Set(body, root+"."+attr, value)
 	}
 	for i := range data.Lists {
-		listName := strings.ReplaceAll(data.Lists[i].Name.Value, "/", ".")
+		listName := strings.ReplaceAll(data.Lists[i].Name.ValueString(), "/", ".")
 		if len(data.Lists[i].Items) > 0 {
 			body, _ = sjson.Set(body, root+"."+listName, []interface{}{})
 			for ii := range data.Lists[i].Items {
 				var listAttributes map[string]string
-				data.Lists[i].Items[ii].Attributes.ElementsAs(ctx, &listAttributes, false)
+				data.Lists[i].Items[ii].ElementsAs(ctx, &listAttributes, false)
 				attrs := restconf.Body{}
 				for attr, value := range listAttributes {
 					attrs = attrs.Set(attr, value)
 				}
 				body, _ = sjson.SetRaw(body, root+"."+listName+".-1", attrs.Str)
 			}
-		} else if len(data.Lists[i].Values.Elems) > 0 {
+		} else if len(data.Lists[i].Values.Elements()) > 0 {
 			var values []string
 			data.Lists[i].Values.ElementsAs(ctx, &values, false)
 			body, _ = sjson.Set(body, root+"."+listName, values)
@@ -103,45 +98,74 @@ func (data *DeviceConfig) fromBody(ctx context.Context, res gjson.Result) {
 	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
 		prefix += "0."
 	}
-	for attr := range data.Attributes.Elems {
+	attributes := data.Attributes.Elements()
+	for attr := range attributes {
 		attrPath := strings.ReplaceAll(attr, "/", ".")
 		value := res.Get(prefix + attrPath)
 		if !value.Exists() ||
 			(value.IsObject() && len(value.Map()) == 0) ||
 			value.Raw == "[null]" {
 
-			data.Attributes.Elems[attr] = types.String{Value: ""}
+			attributes[attr] = types.StringValue("")
 		} else {
-			data.Attributes.Elems[attr] = types.String{Value: value.String()}
+			attributes[attr] = types.StringValue(value.String())
 		}
 	}
+	data.Attributes = types.MapValueMust(types.StringType, attributes)
 
 	for i := range data.Lists {
-		namePath := strings.ReplaceAll(data.Lists[i].Name.Value, "/", ".")
+		keys := strings.Split(data.Lists[i].Key.ValueString(), ",")
+		namePath := strings.ReplaceAll(data.Lists[i].Name.ValueString(), "/", ".")
 		if len(data.Lists[i].Items) > 0 {
 			for ii := range data.Lists[i].Items {
-				for attr := range data.Lists[i].Items[ii].Attributes.Elems {
-					key := data.Lists[i].Key.Value
-					v, _ := data.Lists[i].Items[ii].Attributes.Elems[key].ToTerraformValue(ctx)
+				var keyValues []string
+				for _, key := range keys {
+					v, _ := data.Lists[i].Items[ii].Elements()[key].ToTerraformValue(ctx)
 					var keyValue string
 					v.As(&keyValue)
+					keyValues = append(keyValues, keyValue)
+				}
+
+				// find item by key(s)
+				var r gjson.Result
+				res.Get(prefix + namePath).ForEach(
+					func(_, v gjson.Result) bool {
+						found := false
+						for ik := range keys {
+							if v.Get(keys[ik]).String() == keyValues[ik] {
+								found = true
+								continue
+							}
+							found = false
+							break
+						}
+						if found {
+							r = v
+							return false
+						}
+						return true
+					},
+				)
+
+				attributes := data.Lists[i].Items[ii].Elements()
+				for attr := range attributes {
 					attrPath := strings.ReplaceAll(attr, "/", ".")
-					jsonPath := fmt.Sprintf(`%s%s.#(%s=="%s").%s`, prefix, namePath, key, keyValue, attrPath)
-					value := res.Get(jsonPath)
+					value := r.Get(attrPath)
 					if !value.Exists() ||
 						(value.IsObject() && len(value.Map()) == 0) ||
 						value.Raw == "[null]" {
 
-						data.Lists[i].Items[ii].Attributes.Elems[attr] = types.String{Value: ""}
+						attributes[attr] = types.StringValue("")
 					} else {
-						data.Lists[i].Items[ii].Attributes.Elems[attr] = types.String{Value: value.String()}
+						attributes[attr] = types.StringValue(value.String())
 					}
 				}
+				data.Lists[i].Items[ii] = types.MapValueMust(types.StringType, attributes)
 			}
-		} else if len(data.Lists[i].Values.Elems) > 0 {
+		} else if len(data.Lists[i].Values.Elements()) > 0 {
 			values := res.Get(prefix + namePath)
 			if values.IsArray() {
-				data.Lists[i].Values.Elems = helpers.GetValueSlice(values.Array())
+				data.Lists[i].Values = types.ListValueMust(data.Lists[i].Values.ElementType(ctx), helpers.GetValueSlice(values.Array()))
 			}
 		}
 	}
@@ -150,12 +174,12 @@ func (data *DeviceConfig) fromBody(ctx context.Context, res gjson.Result) {
 func (data *DeviceConfig) getDeletedListItems(ctx context.Context, state DeviceConfig) []string {
 	deletedListItems := make([]string, 0)
 	for l := range state.Lists {
-		name := state.Lists[l].Name.Value
+		name := state.Lists[l].Name.ValueString()
 		namePath := strings.ReplaceAll(name, "/", ".")
-		key := state.Lists[l].Key.Value
+		keys := strings.Split(state.Lists[l].Key.ValueString(), ",")
 		var dataList DeviceConfigList
 		for _, dl := range data.Lists {
-			if dl.Name.Value == name {
+			if dl.Name.ValueString() == name {
 				dataList = dl
 			}
 		}
@@ -163,24 +187,48 @@ func (data *DeviceConfig) getDeletedListItems(ctx context.Context, state DeviceC
 			// check if state item is also included in plan, if not delete item
 			for i := range state.Lists[l].Items {
 				var slia map[string]string
-				state.Lists[l].Items[i].Attributes.ElementsAs(ctx, &slia, false)
-				if slia[key] == "" {
-					continue
-				}
-				found := false
-				for dli := range dataList.Items {
-					var dlia map[string]string
-					dataList.Items[dli].Attributes.ElementsAs(ctx, &dlia, false)
-					if dlia[key] == slia[key] {
-						found = true
+				state.Lists[l].Items[i].ElementsAs(ctx, &slia, false)
+
+				// if state key values are empty move on to next item
+				emptyKey := false
+				for _, key := range keys {
+					if slia[key] == "" {
+						emptyKey = true
 						break
 					}
 				}
+				if emptyKey {
+					continue
+				}
+
+				// find data (plan) item with matching key values
+				found := false
+				for dli := range dataList.Items {
+					var dlia map[string]string
+					dataList.Items[dli].ElementsAs(ctx, &dlia, false)
+					for _, key := range keys {
+						if dlia[key] == slia[key] {
+							found = true
+							continue
+						}
+						found = false
+						break
+					}
+					if found {
+						break
+					}
+				}
+
+				// if no matching item in plan found -> delete
 				if !found {
-					deletedListItems = append(deletedListItems, state.getPath()+"/"+namePath+"="+slia[key])
+					keyValues := make([]string, len(keys))
+					for k, key := range keys {
+						keyValues[k] = slia[key]
+					}
+					deletedListItems = append(deletedListItems, state.getPath()+"/"+namePath+"="+strings.Join(keyValues, ","))
 				}
 			}
-		} else if len(state.Lists[l].Values.Elems) > 0 {
+		} else if len(state.Lists[l].Values.Elements()) > 0 {
 			var slv []string
 			state.Lists[l].Values.ElementsAs(ctx, &slv, false)
 			// check if state value is also included in plan, if not delete value from list

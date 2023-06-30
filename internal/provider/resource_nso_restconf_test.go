@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccNsoRestconf(t *testing.T) {
@@ -40,7 +40,7 @@ func TestAccNsoRestconf(t *testing.T) {
 				Config: testAccNsoRestconfConfig_nested(),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("nso_restconf.nested", "lists.0.name", "customer"),
-					resource.TestCheckResourceAttr("nso_restconf.nested", "lists.0.items.0.attributes.id", "123"),
+					resource.TestCheckResourceAttr("nso_restconf.nested", "lists.0.items.0.id", "123"),
 				),
 			},
 			{
@@ -82,9 +82,7 @@ func testAccNsoRestconfConfig_nested() string {
 				key = "id"
 				items = [
 					{
-						attributes = {
-							id = 123
-						}
+						id = 123
 					}
 				]
 			}

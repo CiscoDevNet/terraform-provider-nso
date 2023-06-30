@@ -6,84 +6,88 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/netascode/go-restconf"
 )
 
-type dataSourceDeviceType struct{}
+// Ensure the implementation satisfies the expected interfaces.
+var (
+	_ datasource.DataSource              = &DeviceDataSource{}
+	_ datasource.DataSourceWithConfigure = &DeviceDataSource{}
+)
 
-func (t dataSourceDeviceType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+func NewDeviceDataSource() datasource.DataSource {
+	return &DeviceDataSource{}
+}
+
+type DeviceDataSource struct {
+	clients map[string]*restconf.Client
+}
+
+func (d *DeviceDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_device"
+}
+
+func (d *DeviceDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "This data source can read the Device configuration.",
 
-		Attributes: map[string]tfsdk.Attribute{
-			"instance": {
+		Attributes: map[string]schema.Attribute{
+			"instance": schema.StringAttribute{
 				MarkdownDescription: "An instance name from the provider configuration.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"id": {
+			"id": schema.StringAttribute{
 				MarkdownDescription: "The RESTCONF path.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
-			"name": {
+			"name": schema.StringAttribute{
 				MarkdownDescription: "A string uniquely identifying the managed device.",
-				Type:                types.StringType,
 				Required:            true,
 			},
-			"address": {
+			"address": schema.StringAttribute{
 				MarkdownDescription: "IP address or host name for the management interface on the device.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
-			"port": {
+			"port": schema.Int64Attribute{
 				MarkdownDescription: "Port for the management interface on the device. If this leaf is not configured, NCS will use a default value based on the type of device. For example, a NETCONF device uses port 830, a CLI device over SSH uses port 22, and an SNMP device uses port 161.",
-				Type:                types.Int64Type,
 				Computed:            true,
 			},
-			"authgroup": {
+			"authgroup": schema.StringAttribute{
 				MarkdownDescription: "The authentication credentials used when connecting to this managed device.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
-			"admin_state": {
+			"admin_state": schema.StringAttribute{
 				MarkdownDescription: "Administrative state.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
-			"netconf_net_id": {
+			"netconf_net_id": schema.StringAttribute{
 				MarkdownDescription: "NETCONF NED ID.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
-			"cli_ned_id": {
+			"cli_ned_id": schema.StringAttribute{
 				MarkdownDescription: "CLI NED ID.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
 		},
-	}, nil
+	}
 }
 
-func (t dataSourceDeviceType) NewDataSource(ctx context.Context, in tfsdk.Provider) (tfsdk.DataSource, diag.Diagnostics) {
-	provider, diags := convertProviderType(in)
+func (d *DeviceDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, _ *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
 
-	return dataSourceDevice{
-		provider: provider,
-	}, diags
+	d.clients = req.ProviderData.(map[string]*restconf.Client)
 }
 
-type dataSourceDevice struct {
-	provider provider
-}
-
-func (d dataSourceDevice) Read(ctx context.Context, req tfsdk.ReadDataSourceRequest, resp *tfsdk.ReadDataSourceResponse) {
-	var config Device
+func (d *DeviceDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config DeviceData
 
 	// Read config
 	diags := req.Config.Get(ctx, &config)
@@ -92,11 +96,16 @@ func (d dataSourceDevice) Read(ctx context.Context, req tfsdk.ReadDataSourceRequ
 		return
 	}
 
+	if _, ok := d.clients[config.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", config.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", config.getPath()))
 
-	res, err := d.provider.clients[config.Instance.Value].GetData(config.getPath(), restconf.Query("content", "config"))
+	res, err := d.clients[config.Instance.ValueString()].GetData(config.getPath(), restconf.Query("content", "config"))
 	if res.StatusCode == 404 {
-		config = Device{Instance: config.Instance}
+		config = DeviceData{Instance: config.Instance}
 	} else {
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
@@ -106,7 +115,7 @@ func (d dataSourceDevice) Read(ctx context.Context, req tfsdk.ReadDataSourceRequ
 		config.fromBody(ctx, res.Res)
 	}
 
-	config.Id = types.String{Value: config.getPath()}
+	config.Id = types.StringValue(config.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", config.getPath()))
 

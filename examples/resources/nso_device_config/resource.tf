@@ -17,10 +17,8 @@ resource "nso_device_config" "access_list" {
       key  = "seq"
       items = [
         {
-          attributes = {
-            seq  = 10
-            rule = "permit ip any"
-          }
+          seq  = 10
+          rule = "permit ip any"
         }
       ]
     }

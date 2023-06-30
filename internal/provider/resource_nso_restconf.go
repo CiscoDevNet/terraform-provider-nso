@@ -4,110 +4,108 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/netascode/go-restconf"
-	"github.com/netascode/terraform-provider-nso/internal/provider/helpers"
 )
 
-type resourceRestconfType struct{}
+// Ensure provider defined types fully satisfy framework interfaces
+var _ resource.Resource = &RestconfResource{}
+var _ resource.ResourceWithImportState = &RestconfResource{}
 
-func (t resourceRestconfType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+func NewRestconfResource() resource.Resource {
+	return &RestconfResource{}
+}
+
+type RestconfResource struct {
+	clients map[string]*restconf.Client
+}
+
+func (r *RestconfResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_restconf"
+}
+
+func (r *RestconfResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "Manages NSO configuration via RESTCONF calls. This resource manages part of a YANG model. It is able to read the state and therefore reconcile configuration drift.",
 
-		Attributes: map[string]tfsdk.Attribute{
-			"instance": {
+		Attributes: map[string]schema.Attribute{
+			"instance": schema.StringAttribute{
 				MarkdownDescription: "An instance name from the provider configuration.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"id": {
-				MarkdownDescription: "The RESTCONF path of the configuration.",
-				Type:                types.StringType,
+			"id": schema.StringAttribute{
+				MarkdownDescription: "The RESTCONF path.",
 				Computed:            true,
-				PlanModifiers: tfsdk.AttributePlanModifiers{
-					tfsdk.UseStateForUnknown(),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"path": {
-				MarkdownDescription: "A RESTCONF path, e.g. `tailf-ncs:ssh`.",
-				Type:                types.StringType,
+			"path": schema.StringAttribute{
+				MarkdownDescription: "A RESTCONF path.",
 				Required:            true,
-				PlanModifiers: tfsdk.AttributePlanModifiers{
-					tfsdk.RequiresReplace(),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"delete": {
+			"delete": schema.BoolAttribute{
 				MarkdownDescription: "Delete object during destroy operation. Default value is `true`.",
-				Type:                types.BoolType,
 				Optional:            true,
 				Computed:            true,
-				PlanModifiers: tfsdk.AttributePlanModifiers{
-					helpers.BooleanDefaultModifier(true),
-				},
+				Default:             booldefault.StaticBool(true),
 			},
-			"attributes": {
-				Type:                types.MapType{ElemType: types.StringType},
-				MarkdownDescription: "Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.",
+			"attributes": schema.MapAttribute{
+				MarkdownDescription: "Map of key-value pairs which represents the YANG leafs and its values.",
 				Optional:            true,
 				Computed:            true,
+				ElementType:         types.StringType,
 			},
-			"lists": {
+			"lists": schema.ListNestedAttribute{
 				MarkdownDescription: "YANG lists.",
 				Optional:            true,
-				Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
-					"name": {
-						MarkdownDescription: "YANG list name. Nested lists (in YANG containers) can be specified using `/` as delimiter.",
-						Type:                types.StringType,
-						Required:            true,
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"name": schema.StringAttribute{
+							MarkdownDescription: "YANG list name.",
+							Required:            true,
+						},
+						"key": schema.StringAttribute{
+							MarkdownDescription: "YANG list key attribute. In case of multiple keys, those should be separated by a comma (`,`).",
+							Optional:            true,
+						},
+						"items": schema.ListAttribute{
+							MarkdownDescription: "List of maps of key-value pairs which represents the YANG leafs and its values.",
+							Optional:            true,
+							ElementType:         types.MapType{ElemType: types.StringType},
+						},
+						"values": schema.ListAttribute{
+							MarkdownDescription: "YANG leaf-list values.",
+							Optional:            true,
+							ElementType:         types.StringType,
+						},
 					},
-					"key": {
-						MarkdownDescription: "YANG list key attribute.",
-						Type:                types.StringType,
-						Optional:            true,
-					},
-					"items": {
-						MarkdownDescription: "Items of YANG lists.",
-						Optional:            true,
-						Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
-							"attributes": {
-								Type:                types.MapType{ElemType: types.StringType},
-								MarkdownDescription: "Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.",
-								Optional:            true,
-								Computed:            true,
-							},
-						}),
-					},
-					"values": {
-						MarkdownDescription: "YANG leaf-list values.",
-						Type:                types.ListType{ElemType: types.StringType},
-						Optional:            true,
-					},
-				}),
+				},
 			},
 		},
-	}, nil
+	}
 }
 
-func (t resourceRestconfType) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk.Resource, diag.Diagnostics) {
-	provider, diags := convertProviderType(in)
+func (r *RestconfResource) Configure(_ context.Context, req resource.ConfigureRequest, _ *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
 
-	return resourceRestconf{
-		provider: provider,
-	}, diags
+	r.clients = req.ProviderData.(map[string]*restconf.Client)
 }
 
-type resourceRestconf struct {
-	provider provider
-}
-
-func (r resourceRestconf) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
+func (r *RestconfResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan Restconf
 
 	// Read plan
@@ -117,12 +115,17 @@ func (r resourceRestconf) Create(ctx context.Context, req tfsdk.CreateResourceRe
 		return
 	}
 
+	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Create", plan.getPath()))
 
 	body := plan.toBody(ctx)
-	res, err := r.provider.clients[plan.Instance.Value].PatchData(plan.getPathShort(), body)
+	res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
 	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.provider.clients[plan.Instance.Value].PutData(plan.getPath(), body)
+		_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
 	}
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
@@ -130,7 +133,10 @@ func (r resourceRestconf) Create(ctx context.Context, req tfsdk.CreateResourceRe
 	}
 
 	plan.Id = plan.Path
-	plan.Attributes.Unknown = false
+
+	if plan.Attributes.IsUnknown() {
+		plan.Attributes = types.MapNull(types.StringType)
+	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Create finished successfully", plan.getPath()))
 
@@ -138,7 +144,7 @@ func (r resourceRestconf) Create(ctx context.Context, req tfsdk.CreateResourceRe
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resourceRestconf) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
+func (r *RestconfResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state Restconf
 
 	// Read state
@@ -148,11 +154,16 @@ func (r resourceRestconf) Read(ctx context.Context, req tfsdk.ReadResourceReques
 		return
 	}
 
+	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.getPath()))
 
-	res, err := r.provider.clients[state.Instance.Value].GetData(state.getPath(), restconf.Query("content", "config"))
+	res, err := r.clients[state.Instance.ValueString()].GetData(state.getPath(), restconf.Query("content", "config"))
 	if res.StatusCode == 404 {
-		state.Attributes.Elems = map[string]attr.Value{}
+		state.Attributes = types.MapNull(types.StringType)
 		state.Lists = make([]RestconfList, 0)
 	} else {
 		if err != nil {
@@ -169,7 +180,7 @@ func (r resourceRestconf) Read(ctx context.Context, req tfsdk.ReadResourceReques
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resourceRestconf) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
+func (r *RestconfResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state Restconf
 
 	// Read plan
@@ -186,12 +197,17 @@ func (r resourceRestconf) Update(ctx context.Context, req tfsdk.UpdateResourceRe
 		return
 	}
 
+	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.getPath()))
 
 	body := plan.toBody(ctx)
-	res, err := r.provider.clients[plan.Instance.Value].PatchData(plan.getPathShort(), body)
+	res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
 	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.provider.clients[plan.Instance.Value].PutData(plan.getPath(), body)
+		_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
 	}
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
@@ -202,7 +218,7 @@ func (r resourceRestconf) Update(ctx context.Context, req tfsdk.UpdateResourceRe
 	tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
 
 	for _, i := range deletedListItems {
-		res, err := r.provider.clients[state.Instance.Value].DeleteData(i)
+		res, err := r.clients[state.Instance.ValueString()].DeleteData(i)
 		if err != nil && res.StatusCode != 404 {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
 			return
@@ -215,7 +231,7 @@ func (r resourceRestconf) Update(ctx context.Context, req tfsdk.UpdateResourceRe
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resourceRestconf) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
+func (r *RestconfResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state Restconf
 
 	// Read state
@@ -225,10 +241,15 @@ func (r resourceRestconf) Delete(ctx context.Context, req tfsdk.DeleteResourceRe
 		return
 	}
 
+	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.getPath()))
 
-	if state.Delete.Value {
-		res, err := r.provider.clients[state.Instance.Value].DeleteData(state.getPath())
+	if state.Delete.ValueBool() {
+		res, err := r.clients[state.Instance.ValueString()].DeleteData(state.getPath())
 		if err != nil && res.StatusCode != 404 {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
 			return
@@ -240,8 +261,8 @@ func (r resourceRestconf) Delete(ctx context.Context, req tfsdk.DeleteResourceRe
 	resp.State.RemoveResource(ctx)
 }
 
-func (r resourceRestconf) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
-	tfsdk.ResourceImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+func (r *RestconfResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Import", req.ID))
 

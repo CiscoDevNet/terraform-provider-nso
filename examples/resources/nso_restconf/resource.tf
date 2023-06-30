@@ -17,9 +17,7 @@ resource "nso_restconf" "customer" {
       key  = "id"
       items = [
         {
-          attributes = {
-            id = 123
-          }
+          id = 123
         }
       ]
     }

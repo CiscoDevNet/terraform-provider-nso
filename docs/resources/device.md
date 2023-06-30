@@ -37,6 +37,8 @@ resource "nso_device" "example" {
   - Choices: `locked`, `unlocked`, `southbound-locked`, `config-locked`, `call-home`
 - `authgroup` (String) The authentication credentials used when connecting to this managed device.
 - `cli_ned_id` (String) CLI NED ID.
+- `delete_mode` (String) Configure behavior when deleting/destroying the resource. Either delete the entire object (YANG container) being managed, or only delete the individual resource attributes configured explicitly and leave everything else as-is. Default value is `all`.
+  - Choices: `all`, `attributes`
 - `instance` (String) An instance name from the provider configuration.
 - `netconf_net_id` (String) NETCONF NED ID.
 - `port` (Number) Port for the management interface on the device. If this leaf is not configured, NCS will use a default value based on the type of device. For example, a NETCONF device uses port 830, a CLI device over SSH uses port 22, and an SNMP device uses port 161.

@@ -34,5 +34,3 @@ data "nso_device_group" "example" {
 - `device_groups` (List of String) A list of device groups.
 - `device_names` (List of String) A list of device names.
 - `id` (String) The RESTCONF path.
-
-

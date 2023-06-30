@@ -32,7 +32,5 @@ data "nso_device_config" "example" {
 
 ### Read-Only
 
-- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values.
+- `attributes` (Map of String) Map of key-value pairs which represents the YANG leafs and its values.
 - `id` (String) The RESTCONF path of the retrieved configuration.
-
-

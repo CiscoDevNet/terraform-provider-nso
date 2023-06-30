@@ -4,66 +4,75 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/netascode/go-restconf"
-	"github.com/netascode/terraform-provider-nso/internal/provider/helpers"
 )
 
-type dataSourceDeviceConfigType struct{}
+// Ensure the implementation satisfies the expected interfaces.
+var (
+	_ datasource.DataSource              = &DeviceConfigDataSource{}
+	_ datasource.DataSourceWithConfigure = &DeviceConfigDataSource{}
+)
 
-func (t dataSourceDeviceConfigType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+func NewDeviceConfigDataSource() datasource.DataSource {
+	return &DeviceConfigDataSource{}
+}
+
+type DeviceConfigDataSource struct {
+	clients map[string]*restconf.Client
+}
+
+func (d *DeviceConfigDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_device_config"
+}
+
+func (d *DeviceConfigDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "Retrieves a config part of an NSO device.",
 
-		Attributes: map[string]tfsdk.Attribute{
-			"instance": {
+		Attributes: map[string]schema.Attribute{
+			"instance": schema.StringAttribute{
 				MarkdownDescription: "An instance name from the provider configuration.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"id": {
+			"id": schema.StringAttribute{
 				MarkdownDescription: "The RESTCONF path of the retrieved configuration.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
-			"device": {
+			"device": schema.StringAttribute{
 				MarkdownDescription: "An NSO device name.",
-				Type:                types.StringType,
 				Required:            true,
 			},
-			"path": {
+			"path": schema.StringAttribute{
 				MarkdownDescription: "A RESTCONF/YANG config path, e.g. `tailf-ned-cisco-ios:access-list/access-list=1`.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"attributes": {
-				MarkdownDescription: "Map of key-value pairs which represents the attributes and its values.",
-				Type:                types.MapType{ElemType: types.StringType},
+			"attributes": schema.MapAttribute{
+				MarkdownDescription: "Map of key-value pairs which represents the YANG leafs and its values.",
+				ElementType:         types.StringType,
 				Computed:            true,
 			},
 		},
-	}, nil
+	}
 }
 
-func (t dataSourceDeviceConfigType) NewDataSource(ctx context.Context, in tfsdk.Provider) (tfsdk.DataSource, diag.Diagnostics) {
-	provider, diags := convertProviderType(in)
+func (d *DeviceConfigDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, _ *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
 
-	return dataSourceDeviceConfig{
-		provider: provider,
-	}, diags
+	d.clients = req.ProviderData.(map[string]*restconf.Client)
 }
 
-type dataSourceDeviceConfig struct {
-	provider provider
-}
-
-func (d dataSourceDeviceConfig) Read(ctx context.Context, req tfsdk.ReadDataSourceRequest, resp *tfsdk.ReadDataSourceResponse) {
-	var config, state DeviceConfigDataSource
+func (d *DeviceConfigDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config, state DeviceConfigData
 
 	// Read config
 	diags := req.Config.Get(ctx, &config)
@@ -72,39 +81,43 @@ func (d dataSourceDeviceConfig) Read(ctx context.Context, req tfsdk.ReadDataSour
 		return
 	}
 
-	path := "tailf-ncs:devices/device=" + config.Device.Value + "/config"
-	if config.Path.Value != "" {
-		path = "tailf-ncs:devices/device=" + config.Device.Value + "/config/" + config.Path.Value
+	if _, ok := d.clients[config.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", config.Instance.ValueString()))
+		return
+	}
+
+	path := "tailf-ncs:devices/device=" + config.Instance.ValueString() + "/config"
+	if config.Path.ValueString() != "" {
+		path = "tailf-ncs:devices/device=" + config.Instance.ValueString() + "/config/" + config.Path.ValueString()
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", path))
 
-	res, err := d.provider.clients[config.Instance.Value].GetData(path, restconf.Query("content", "config"))
+	res, err := d.clients[config.Instance.ValueString()].GetData(path, restconf.Query("content", "config"))
 	if res.StatusCode == 404 {
-		state.Attributes.Elems = map[string]attr.Value{}
+		state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
 	} else {
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
 			return
 		}
 
-		state.Path.Value = path
-		state.Id.Value = path
+		state.Path = types.StringValue(path)
+		state.Id = types.StringValue(path)
 
 		attributes := make(map[string]attr.Value)
 
 		for attr, value := range res.Res.Get(helpers.LastElement(path)).Map() {
 			// handle empty maps
 			if value.IsObject() && len(value.Map()) == 0 {
-				attributes[attr] = types.String{Value: ""}
+				attributes[attr] = types.StringValue("")
 			} else if value.Raw == "[null]" {
-				attributes[attr] = types.String{Value: ""}
+				attributes[attr] = types.StringValue("")
 			} else {
-				attributes[attr] = types.String{Value: value.String()}
+				attributes[attr] = types.StringValue(value.String())
 			}
 		}
-		state.Attributes.Elems = attributes
-		state.Attributes.ElemType = types.StringType
+		state.Attributes = types.MapValueMust(types.StringType, attributes)
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", path))

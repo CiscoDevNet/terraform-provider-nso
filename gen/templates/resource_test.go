@@ -7,7 +7,7 @@ package provider
 import (
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccNso{{camelCase .Name}}(t *testing.T) {
@@ -20,16 +20,25 @@ func TestAccNso{{camelCase .Name}}(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					{{- $name := .Name }}
 					{{- range  .Attributes}}
-					{{- if and (ne .Reference true) (ne .WriteOnly true) (ne .ExcludeTest true)}}
+					{{- if and (not .Reference) (not .WriteOnly) (not .ExcludeTest)}}
 					{{- if eq .Type "List"}}
 					{{- $list := .TfName }}
 					{{- range  .Attributes}}
-					{{- if and (ne .WriteOnly true) (ne .ExcludeTest true)}}
-					resource.TestCheckResourceAttr("nso_{{snakeCase $name}}.test", "{{$list}}.0.{{.TfName}}", "{{.Example}}"),
+					{{- if and (not .WriteOnly) (not .ExcludeTest)}}
+					{{- if eq .Type "List"}}
+					{{- $clist := .TfName }}
+					{{- range  .Attributes}}
+					{{- if and (not .WriteOnly) (not .ExcludeTest)}}
+					resource.TestCheckResourceAttr("nso_{{snakeCase $name}}.test", "{{$list}}.0.{{$clist}}.0.{{.TfName}}{{if or (eq .Type "StringList") (eq .Type "Int64List")}}.0{{end}}", "{{.Example}}"),
 					{{- end}}
 					{{- end}}
 					{{- else}}
-					resource.TestCheckResourceAttr("nso_{{snakeCase $name}}.test", "{{.TfName}}", "{{.Example}}"),
+					resource.TestCheckResourceAttr("nso_{{snakeCase $name}}.test", "{{$list}}.0.{{.TfName}}{{if or (eq .Type "StringList") (eq .Type "Int64List")}}.0{{end}}", "{{.Example}}"),
+					{{- end}}
+					{{- end}}
+					{{- end}}
+					{{- else}}
+					resource.TestCheckResourceAttr("nso_{{snakeCase $name}}.test", "{{.TfName}}{{if or (eq .Type "StringList") (eq .Type "Int64List")}}.0{{end}}", "{{.Example}}"),
 					{{- end}}
 					{{- end}}
 					{{- end}}
@@ -48,39 +57,39 @@ func TestAccNso{{camelCase .Name}}(t *testing.T) {
 const testAccNso{{camelCase .Name}}PrerequisitesConfig = `
 {{- range $index, $item := .TestPrerequisites}}
 resource "nso_restconf" "PreReq{{$index}}" {
-  path = "{{.Path}}"
-  {{- if .NoDelete}}
-  delete = false
-  {{- end}}
-  attributes = {
-    {{- range  .Attributes}}
-      {{.Name}} = {{if .Reference}}{{.Reference}}{{else}}"{{.Value}}"{{end}}
-    {{- end}}
-  }
-  {{- if .Lists}}
-  lists = [
-  {{- range .Lists}}
-    {
-      name = "{{.Name}}"
-	  key = "{{.Key}}"
-      items = [
-        {{- range .Items}}
-          {
-            attributes = {
-			{{- range .Attributes}}
-				{{.Name}} = {{if .Reference}}{{.Reference}}{{else}}"{{.Value}}"{{end}}
-			{{- end}}
-            }
-          },
-        {{- end}}
-      ] 
-    },
-  {{- end}}
-  ]
-  {{- end}}
-  {{- if .Dependencies}}
-  depends_on = [{{range .Dependencies}}nso_restconf.PreReq{{.}}, {{end}}]
-  {{- end}}
+	path = "{{.Path}}"
+	{{- if .NoDelete}}
+	delete = false
+	{{- end}}
+	attributes = {
+		{{- range  .Attributes}}
+		"{{.Name}}" = {{if .Reference}}{{.Reference}}{{else}}"{{.Value}}"{{end}}
+		{{- end}}
+	}
+	{{- if .Lists}}
+	lists = [
+		{{- range .Lists}}
+		{
+			name = "{{.Name}}"
+			key = "{{.Key}}"
+			items = [
+				{{- range .Items}}
+				{
+					attributes = {
+						{{- range .Attributes}}
+						"{{.Name}}" = {{if .Reference}}{{.Reference}}{{else}}"{{.Value}}"{{end}}
+						{{- end}}
+					}
+				},
+				{{- end}}
+			] 
+		},
+		{{- end}}
+	]
+	{{- end}}
+	{{- if .Dependencies}}
+	depends_on = [{{range .Dependencies}}nso_restconf.PreReq{{.}}, {{end}}]
+	{{- end}}
 }
 {{ end}}
 `
@@ -90,22 +99,32 @@ func testAccNso{{camelCase .Name}}Config_minimum() string {
 	return `
 	resource "nso_{{snakeCase $name}}" "test" {
 	{{- range  .Attributes}}
-	{{- if or (eq .Reference true) (eq .Id true) (eq .Mandatory true)}}
-	{{- if and (eq .Type "List") (ne .ListElement "String")}}
+	{{- if or .Reference .Id .Mandatory}}
+	{{- if eq .Type "List"}}
 		{{.TfName}} = [{
 		{{- range  .Attributes}}
-		{{- if ne .ExcludeTest true}}
-		{{.TfName}} = {{if eq .Type "String"}}"{{end}}{{.Example}}{{if eq .Type "String"}}"{{end}}
+		{{- if not .ExcludeTest}}
+		{{- if eq .Type "List"}}
+			{{.TfName}} = [{
+				{{- range  .Attributes}}
+				{{- if not .ExcludeTest}}
+				{{.TfName}} = {{if eq .Type "String"}}"{{.Example}}"{{else if eq .Type "StringList"}}["{{.Example}}"]{{else if eq .Type "Int64List"}}[{{.Example}}]{{else}}{{.Example}}{{end}}
+				{{- end}}
+				{{- end}}
+			}]
+		{{- else}}
+			{{.TfName}} = {{if eq .Type "String"}}"{{.Example}}"{{else if eq .Type "StringList"}}["{{.Example}}"]{{else if eq .Type "Int64List"}}[{{.Example}}]{{else}}{{.Example}}{{end}}
+		{{- end}}
 		{{- end}}
 		{{- end}}
 		}]
 	{{- else}}
-		{{.TfName}} = {{if eq .Type "String"}}"{{end}}{{.Example}}{{if eq .Type "String"}}"{{end}}
+		{{.TfName}} = {{if eq .Type "String"}}"{{.Example}}"{{else if eq .Type "StringList"}}["{{.Example}}"]{{else if eq .Type "Int64List"}}[{{.Example}}]{{else}}{{.Example}}{{end}}
 	{{- end}}
 	{{- end}}
 	{{- end}}
 	{{- if .TestPrerequisites}}
-  		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_restconf.PreReq{{$index}}, {{end}}]
+		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_restconf.PreReq{{$index}}, {{end}}]
 	{{- end}}
 	}
 	`
@@ -114,23 +133,36 @@ func testAccNso{{camelCase .Name}}Config_minimum() string {
 func testAccNso{{camelCase .Name}}Config_all() string {
 	return `
 	resource "nso_{{snakeCase $name}}" "test" {
+	{{- if and (not .NoDelete) (not .NoDeleteAttributes) .DefaultDeleteAttributes}}
+		delete_mode = "all"
+	{{- end}}
 	{{- range  .Attributes}}
-	{{- if ne .ExcludeTest true}}
-	{{- if and (eq .Type "List") (ne .ListElement "String")}}
+	{{- if not .ExcludeTest}}
+	{{- if eq .Type "List"}}
 		{{.TfName}} = [{
 		{{- range  .Attributes}}
-		{{- if ne .ExcludeTest true}}
-		{{.TfName}} = {{if eq .Type "String"}}"{{end}}{{.Example}}{{if eq .Type "String"}}"{{end}}
+		{{- if not .ExcludeTest}}
+		{{- if eq .Type "List"}}
+			{{.TfName}} = [{
+				{{- range  .Attributes}}
+				{{- if not .ExcludeTest}}
+				{{.TfName}} = {{if eq .Type "String"}}"{{.Example}}"{{else if eq .Type "StringList"}}["{{.Example}}"]{{else if eq .Type "Int64List"}}[{{.Example}}]{{else}}{{.Example}}{{end}}
+				{{- end}}
+				{{- end}}
+			}]
+		{{- else}}
+			{{.TfName}} = {{if eq .Type "String"}}"{{.Example}}"{{else if eq .Type "StringList"}}["{{.Example}}"]{{else if eq .Type "Int64List"}}[{{.Example}}]{{else}}{{.Example}}{{end}}
+		{{- end}}
 		{{- end}}
 		{{- end}}
 		}]
 	{{- else}}
-		{{.TfName}} = {{if eq .Type "String"}}"{{end}}{{.Example}}{{if eq .Type "String"}}"{{end}}
+		{{.TfName}} = {{if eq .Type "String"}}"{{.Example}}"{{else if eq .Type "StringList"}}["{{.Example}}"]{{else if eq .Type "Int64List"}}[{{.Example}}]{{else}}{{.Example}}{{end}}
 	{{- end}}
 	{{- end}}
 	{{- end}}
 	{{- if .TestPrerequisites}}
-  		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_restconf.PreReq{{$index}}, {{end}}]
+		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_restconf.PreReq{{$index}}, {{end}}]
 	{{- end}}
 	}
 	`

@@ -6,73 +6,85 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/netascode/terraform-provider-nso/internal/provider/helpers"
 	"github.com/netascode/go-restconf"
 )
 
-type resourceDeviceGroupType struct{}
+func NewDeviceGroupResource() resource.Resource {
+	return &DeviceGroupResource{}
+}
 
-func (t resourceDeviceGroupType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+type DeviceGroupResource struct {
+	clients map[string]*restconf.Client
+}
+
+func (r *DeviceGroupResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_device_group"
+}
+
+func (r *DeviceGroupResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "This resource can manage the Device Group configuration.",
 
-		Attributes: map[string]tfsdk.Attribute{
-			"instance": {
+		Attributes: map[string]schema.Attribute{
+			"instance": schema.StringAttribute{
 				MarkdownDescription: "An instance name from the provider configuration.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"id": {
+			"id": schema.StringAttribute{
 				MarkdownDescription: "The RESTCONF path.",
-				Type:                types.StringType,
 				Computed:            true,
-				PlanModifiers: tfsdk.AttributePlanModifiers{
-					tfsdk.UseStateForUnknown(),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"name": {
+			"delete_mode": schema.StringAttribute{
+				MarkdownDescription: helpers.NewAttributeDescription("Configure behavior when deleting/destroying the resource. Either delete the entire object (YANG container) being managed, or only delete the individual resource attributes configured explicitly and leave everything else as-is. Default value is `all`.").AddStringEnumDescription("all", "attributes").String,
+				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("all", "attributes"),
+				},
+			},
+			"name": schema.StringAttribute{
 				MarkdownDescription: helpers.NewAttributeDescription("Device group name.").String,
-				Type:                types.StringType,
 				Required:            true,
-				PlanModifiers: tfsdk.AttributePlanModifiers{
-					tfsdk.RequiresReplace(),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"device_names": {
+			"device_names": schema.ListAttribute{
 				MarkdownDescription: helpers.NewAttributeDescription("A list of device names.").String,
-				Type:                types.ListType{ElemType: types.StringType},
+				ElementType:         types.StringType,
 				Optional:            true,
-				Computed:            true,
 			},
-			"device_groups": {
+			"device_groups": schema.ListAttribute{
 				MarkdownDescription: helpers.NewAttributeDescription("A list of device groups.").String,
-				Type:                types.ListType{ElemType: types.StringType},
+				ElementType:         types.StringType,
 				Optional:            true,
-				Computed:            true,
 			},
 		},
-	}, nil
+	}
 }
 
-func (t resourceDeviceGroupType) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk.Resource, diag.Diagnostics) {
-	provider, diags := convertProviderType(in)
+func (r *DeviceGroupResource) Configure(_ context.Context, req resource.ConfigureRequest, _ *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
 
-	return resourceDeviceGroup{
-		provider: provider,
-	}, diags
+	r.clients = req.ProviderData.(map[string]*restconf.Client)
 }
 
-type resourceDeviceGroup struct {
-	provider provider
-}
-
-func (r resourceDeviceGroup) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
+func (r *DeviceGroupResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan DeviceGroup
 
 	// Read plan
@@ -82,34 +94,48 @@ func (r resourceDeviceGroup) Create(ctx context.Context, req tfsdk.CreateResourc
 		return
 	}
 
+	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Create", plan.getPath()))
 
 	// Create object
 	body := plan.toBody(ctx)
 
-	res, err := r.provider.clients[plan.Instance.Value].PatchData(plan.getPathShort(), body)
-	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.provider.clients[plan.Instance.Value].PutData(plan.getPath(), body)
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
-		return
-	}
-
 	emptyLeafsDelete := plan.getEmptyLeafsDelete(ctx)
 	tflog.Debug(ctx, fmt.Sprintf("List of empty leafs to delete: %+v", emptyLeafsDelete))
 
-	for _, i := range emptyLeafsDelete {
-		res, err := r.provider.clients[plan.Instance.Value].DeleteData(i)
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+	if YangPatch {
+		edits := []restconf.YangPatchEdit{restconf.NewYangPatchEdit("merge", plan.getPath(), restconf.Body{Str: body})}
+		for _, i := range emptyLeafsDelete {
+			edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+		}
+		_, err := r.clients[plan.Instance.ValueString()].YangPatchData("", "1", "", edits)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object, got error: %s", err))
 			return
+		}
+	} else {
+		res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
+		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
+			_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+			return
+		}
+		for _, i := range emptyLeafsDelete {
+			res, err := r.clients[plan.Instance.ValueString()].DeleteData(i)
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
 		}
 	}
 
-	plan.setUnknownValues()
-	
-	plan.Id = types.String{Value: plan.getPath()}
+	plan.Id = types.StringValue(plan.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Create finished successfully", plan.getPath()))
 
@@ -117,7 +143,7 @@ func (r resourceDeviceGroup) Create(ctx context.Context, req tfsdk.CreateResourc
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resourceDeviceGroup) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
+func (r *DeviceGroupResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state DeviceGroup
 
 	// Read state
@@ -127,9 +153,14 @@ func (r resourceDeviceGroup) Read(ctx context.Context, req tfsdk.ReadResourceReq
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.Id.Value))
+	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
+		return
+	}
 
-	res, err := r.provider.clients[state.Instance.Value].GetData(state.Id.Value, restconf.Query("content", "config"))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.Id.ValueString()))
+
+	res, err := r.clients[state.Instance.ValueString()].GetData(state.Id.ValueString(), restconf.Query("content", "config"))
 	if res.StatusCode == 404 {
 		state = DeviceGroup{Instance: state.Instance, Id: state.Id}
 	} else {
@@ -141,13 +172,13 @@ func (r resourceDeviceGroup) Read(ctx context.Context, req tfsdk.ReadResourceReq
 		state.updateFromBody(ctx, res.Res)
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", state.Id.Value))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", state.Id.ValueString()))
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resourceDeviceGroup) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
+func (r *DeviceGroupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state DeviceGroup
 
 	// Read plan
@@ -164,49 +195,66 @@ func (r resourceDeviceGroup) Update(ctx context.Context, req tfsdk.UpdateResourc
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.Id.Value))
-
-	body := plan.toBody(ctx)
-	res, err := r.provider.clients[plan.Instance.Value].PatchData(plan.getPathShort(), body)
-	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.provider.clients[plan.Instance.Value].PutData(plan.getPath(), body)
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
 		return
 	}
 
-	plan.setUnknownValues()
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.Id.ValueString()))
+
+	body := plan.toBody(ctx)
 
 	deletedListItems := plan.getDeletedListItems(ctx, state)
 	tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
 
-	for _, i := range deletedListItems {
-		res, err := r.provider.clients[state.Instance.Value].DeleteData(i)
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
-			return
-		}
-	}
-
 	emptyLeafsDelete := plan.getEmptyLeafsDelete(ctx)
 	tflog.Debug(ctx, fmt.Sprintf("List of empty leafs to delete: %+v", emptyLeafsDelete))
 
-	for _, i := range emptyLeafsDelete {
-		res, err := r.provider.clients[plan.Instance.Value].DeleteData(i)
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+	if YangPatch {
+		edits := []restconf.YangPatchEdit{restconf.NewYangPatchEdit("merge", plan.getPath(), restconf.Body{Str: body})}
+		for _, i := range deletedListItems {
+			edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+		}
+		for _, i := range emptyLeafsDelete {
+			edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+		}
+		_, err := r.clients[plan.Instance.ValueString()].YangPatchData("", "1", "", edits)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update object, got error: %s", err))
 			return
+		}
+	} else {
+		res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
+		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
+			_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+			return
+		}
+		for _, i := range deletedListItems {
+			res, err := r.clients[state.Instance.ValueString()].DeleteData(i)
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
+		}
+		for _, i := range emptyLeafsDelete {
+			res, err := r.clients[plan.Instance.ValueString()].DeleteData(i)
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
 		}
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Update finished successfully", plan.Id.Value))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Update finished successfully", plan.Id.ValueString()))
 
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resourceDeviceGroup) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
+func (r *DeviceGroupResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state DeviceGroup
 
 	// Read state
@@ -216,19 +264,55 @@ func (r resourceDeviceGroup) Delete(ctx context.Context, req tfsdk.DeleteResourc
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.Id.Value))
-
-	res, err := r.provider.clients[state.Instance.Value].DeleteData(state.Id.Value)
-	if err != nil && res.StatusCode != 404 && res.StatusCode != 400 {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Delete finished successfully", state.Id.Value))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.Id.ValueString()))
+	deleteMode := "all"
+	if state.DeleteMode.ValueString() == "all" {
+		deleteMode = "all"
+	} else if state.DeleteMode.ValueString() == "attributes" {
+		deleteMode = "attributes"
+	}
+
+	if deleteMode == "all" {
+		res, err := r.clients[state.Instance.ValueString()].DeleteData(state.Id.ValueString())
+		if err != nil && res.StatusCode != 404 && res.StatusCode != 400 {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+			return
+		}
+	} else {
+		deletePaths := state.getDeletePaths(ctx)
+		tflog.Debug(ctx, fmt.Sprintf("Paths to delete: %+v", deletePaths))
+
+		if YangPatch {
+			edits := []restconf.YangPatchEdit{}
+			for _, i := range deletePaths {
+				edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+			}
+			_, err := r.clients[state.Instance.ValueString()].YangPatchData("", "1", "", edits)
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
+		} else {
+			for _, i := range deletePaths {
+				res, err := r.clients[state.Instance.ValueString()].DeleteData(i)
+				if err != nil && res.StatusCode != 404 {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+					return
+				}
+			}
+		}
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("%s: Delete finished successfully", state.Id.ValueString()))
 
 	resp.State.RemoveResource(ctx)
 }
 
-func (r resourceDeviceGroup) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
-	tfsdk.ResourceImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+func (r *DeviceGroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }

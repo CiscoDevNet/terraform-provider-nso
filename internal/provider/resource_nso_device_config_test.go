@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccNsoDeviceConfig(t *testing.T) {
@@ -40,7 +40,7 @@ func TestAccNsoDeviceConfig(t *testing.T) {
 				Config: testAccNsoDeviceConfigConfig_nested(),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.name", "rule"),
-					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.items.0.attributes.seq", "10"),
+					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.items.0.seq", "10"),
 				),
 			},
 		},
@@ -80,10 +80,8 @@ func testAccNsoDeviceConfigConfig_nested() string {
 				key = "seq"
 				items = [
 					{
-						attributes = {
-							seq = 10
-							rule = "permit ip any"
-						}
+						seq = 10
+						rule = "permit ip any"
 					}
 				]
 			}

@@ -28,6 +28,8 @@ resource "nso_device_group" "example" {
 
 ### Optional
 
+- `delete_mode` (String) Configure behavior when deleting/destroying the resource. Either delete the entire object (YANG container) being managed, or only delete the individual resource attributes configured explicitly and leave everything else as-is. Default value is `all`.
+  - Choices: `all`, `attributes`
 - `device_groups` (List of String) A list of device groups.
 - `device_names` (List of String) A list of device names.
 - `instance` (String) An instance name from the provider configuration.

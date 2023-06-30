@@ -7,38 +7,65 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/netascode/terraform-provider-nso/internal/provider/helpers"
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/netascode/go-restconf"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 )
 
-type resource{{camelCase .Name}}Type struct{}
+func New{{camelCase .Name}}Resource() resource.Resource {
+	return &{{camelCase .Name}}Resource{}
+}
 
-func (t resource{{camelCase .Name}}Type) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+type {{camelCase .Name}}Resource struct {
+	clients map[string]*restconf.Client
+}
+
+func (r *{{camelCase .Name}}Resource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_{{snakeCase .Name}}"
+}
+
+func (r *{{camelCase .Name}}Resource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "{{.ResDescription}}",
 
-		Attributes: map[string]tfsdk.Attribute{
-			"instance": {
+		Attributes: map[string]schema.Attribute{
+			"instance": schema.StringAttribute{
 				MarkdownDescription: "An instance name from the provider configuration.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"id": {
+			"id": schema.StringAttribute{
 				MarkdownDescription: "The RESTCONF path.",
-				Type:                types.StringType,
 				Computed:            true,
-				PlanModifiers: tfsdk.AttributePlanModifiers{
-					tfsdk.UseStateForUnknown(),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			{{- if and (not .NoDelete) (not .NoDeleteAttributes)}}
+			"delete_mode": schema.StringAttribute{
+				MarkdownDescription: helpers.NewAttributeDescription("Configure behavior when deleting/destroying the resource. Either delete the entire object (YANG container) being managed, or only delete the individual resource attributes configured explicitly and leave everything else as-is. Default value is `all`.").AddStringEnumDescription("all", "attributes").String,
+				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("all", "attributes"),
+				},
+			},
+			{{- end}}
 			{{- range  .Attributes}}
-			"{{.TfName}}": {
+			"{{.TfName}}": schema.{{if eq .Type "List"}}ListNested{{else if or (eq .Type "StringList") (eq .Type "Int64List")}}List{{else}}{{.Type}}{{end}}Attribute{
 				MarkdownDescription: helpers.NewAttributeDescription("{{.Description}}")
 					{{- if len .EnumValues -}}
 					.AddStringEnumDescription({{range .EnumValues}}"{{.}}", {{end}})
@@ -50,114 +77,192 @@ func (t resource{{camelCase .Name}}Type) GetSchema(ctx context.Context) (tfsdk.S
 					.AddDefaultValueDescription("{{.DefaultValue}}")
 					{{- end -}}
 					.String,
-				{{- if ne .Type "List"}}
-				Type:                types.{{.Type}}Type,
-				{{- else if and (eq .Type "List") (eq .ListElement "String")}}
-				Type:                types.ListType{ElemType: types.StringType},
+				{{- if eq .Type "StringList"}}
+				ElementType:         types.StringType,
+				{{- else if eq .Type "Int64List"}}
+				ElementType:         types.Int64Type,
 				{{- end}}
-				{{- if or (eq .Id true) (eq .Reference true) (eq .Mandatory true)}}
+				{{- if or .Id .Reference .Mandatory}}
 				Required:            true,
 				{{- else}}
 				Optional:            true,
-				{{- if or (ne .Type "List") (eq .ListElement "String")}}
+				{{- end}}
+				{{- if len .DefaultValue}}
 				Computed:            true,
 				{{- end}}
-				{{- end}}
 				{{- if len .EnumValues}}
-				Validators: []tfsdk.AttributeValidator{
-					helpers.StringEnumValidator({{range .EnumValues}}"{{.}}", {{end}}),
+				Validators: []validator.String{
+					stringvalidator.OneOf({{range .EnumValues}}"{{.}}", {{end}}),
 				},
-				{{- else if len .StringPatterns}}
-				Validators: []tfsdk.AttributeValidator{
-					helpers.StringPatternValidator({{.StringMinLength}}, {{.StringMaxLength}}, {{range .StringPatterns}}`{{.}}`, {{end}}),
-				},
-				{{- else if or (ne .MinInt 0) (ne .MaxInt 0)}}
-				Validators: []tfsdk.AttributeValidator{
-					helpers.IntegerRangeValidator({{.MinInt}}, {{.MaxInt}}),
-				},
-				{{- end}}
-				{{- if or (len .DefaultValue) (eq .Id true) (eq .Reference true) (eq .RequiresReplace true)}}
-				PlanModifiers: tfsdk.AttributePlanModifiers{
-					{{- if or (eq .Id true) (eq .Reference true) (eq .RequiresReplace true)}}
-					tfsdk.RequiresReplace(),
-					{{- else if eq .Type "Int64"}}
-					helpers.IntegerDefaultModifier({{.DefaultValue}}),
-					{{- else if eq .Type "Bool"}}
-					helpers.BooleanDefaultModifier({{.DefaultValue}}),
-					{{- else if eq .Type "String"}}
-					helpers.StringDefaultModifier("{{.DefaultValue}}"),
+				{{- else if or (len .StringPatterns) (ne .StringMinLength 0) (ne .StringMaxLength 0) }}
+				Validators: []validator.String{
+					{{- if or (ne .StringMinLength 0) (ne .StringMaxLength 0)}}
+					stringvalidator.LengthBetween({{.StringMinLength}}, {{.StringMaxLength}}),
+					{{- end}}
+					{{- range .StringPatterns}}
+					stringvalidator.RegexMatches(regexp.MustCompile(`{{.}}`), ""),
 					{{- end}}
 				},
+				{{- else if or (ne .MinInt 0) (ne .MaxInt 0)}}
+				Validators: []validator.Int64{
+					int64validator.Between({{.MinInt}}, {{.MaxInt}}),
+				},
+				{{- else if or (ne .MinFloat 0.0) (ne .MaxFloat 0.0)}}
+				Validators: []validator.Float64{
+					float64validator.Between({{.MinFloat}}, {{.MaxFloat}}),
+				},
 				{{- end}}
-				{{- if and (eq .Type "List") (ne .ListElement "String")}}
-				Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
-					{{- range  .Attributes}}
-					"{{.TfName}}": {
-						MarkdownDescription: helpers.NewAttributeDescription("{{.Description}}")
-							{{- if len .EnumValues -}}
-							.AddStringEnumDescription({{range .EnumValues}}"{{.}}", {{end}})
-							{{- end -}}
-							{{- if or (ne .MinInt 0) (ne .MaxInt 0) -}}
-							.AddIntegerRangeDescription({{.MinInt}}, {{.MaxInt}})
-							{{- end -}}
-							{{- if len .DefaultValue -}}
-							.AddDefaultValueDescription("{{.DefaultValue}}")
-							{{- end -}}
-							.String,
-						Type:                types.{{.Type}}Type,
-						{{- if eq .Mandatory true}}
-						Required:            true,
-						{{- else}}
-						Optional:            true,
-						Computed:            true,
-						{{- end}}
-						{{- if len .EnumValues}}
-						Validators: []tfsdk.AttributeValidator{
-							helpers.StringEnumValidator({{range .EnumValues}}"{{.}}", {{end}}),
-						},
-						{{- else if len .StringPatterns}}
-						Validators: []tfsdk.AttributeValidator{
-							helpers.StringPatternValidator({{.StringMinLength}}, {{.StringMaxLength}}, {{range .StringPatterns}}`{{.}}`, {{end}}),
-						},
-						{{- else if or (ne .MinInt 0) (ne .MaxInt 0)}}
-						Validators: []tfsdk.AttributeValidator{
-							helpers.IntegerRangeValidator({{.MinInt}}, {{.MaxInt}}),
-						},
-						{{- end}}
-						{{- if len .DefaultValue}}
-						PlanModifiers: tfsdk.AttributePlanModifiers{
-							{{- if eq .Type "Int64"}}
-							helpers.IntegerDefaultModifier({{.DefaultValue}}),
-							{{- else if eq .Type "Bool"}}
-							helpers.BooleanDefaultModifier({{.DefaultValue}}),
-							{{- else if eq .Type "String"}}
-							helpers.StringDefaultModifier("{{.DefaultValue}}"),
+				{{- if or .Id .Reference .RequiresReplace}}
+				PlanModifiers: []planmodifier.{{.Type}}{
+					{{snakeCase .Type}}planmodifier.RequiresReplace(),
+				},
+				{{- end}}
+				{{- if and (len .DefaultValue) (eq .Type "Int64")}}
+				Default:             int64default.StaticInt64({{.DefaultValue}}),
+				{{- else if and (len .DefaultValue) (eq .Type "Bool")}}
+				Default:             booldefault.StaticBool({{.DefaultValue}}),
+				{{- else if and (len .DefaultValue) (eq .Type "String")}}
+				Default:             stringdefault.StaticString("{{.DefaultValue}}"),
+				{{- end}}
+				{{- if eq .Type "List"}}
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						{{- range  .Attributes}}
+						"{{.TfName}}": schema.{{if eq .Type "List"}}ListNested{{else if or (eq .Type "StringList") (eq .Type "Int64List")}}List{{else}}{{.Type}}{{end}}Attribute{
+							MarkdownDescription: helpers.NewAttributeDescription("{{.Description}}")
+								{{- if len .EnumValues -}}
+								.AddStringEnumDescription({{range .EnumValues}}"{{.}}", {{end}})
+								{{- end -}}
+								{{- if or (ne .MinInt 0) (ne .MaxInt 0) -}}
+								.AddIntegerRangeDescription({{.MinInt}}, {{.MaxInt}})
+								{{- end -}}
+								{{- if or (ne .MinFloat 0.0) (ne .MaxFloat 0.0) -}}
+								.AddFloatRangeDescription({{.MinFloat}}, {{.MaxFloat}})
+								{{- end -}}
+								{{- if len .DefaultValue -}}
+								.AddDefaultValueDescription("{{.DefaultValue}}")
+								{{- end -}}
+								.String,
+							{{- if eq .Type "StringList"}}
+							ElementType:         types.StringType,
+							{{- else if eq .Type "Int64List"}}
+							ElementType:         types.Int64Type,
+							{{- end}}
+							{{- if or .Id .Mandatory}}
+							Required:            true,
+							{{- else}}
+							Optional:            true,
+							{{- end}}
+							{{- if len .DefaultValue}}
+							Computed:            true,
+							{{- end}}
+							{{- if len .EnumValues}}
+							Validators: []validator.String{
+								stringvalidator.OneOf({{range .EnumValues}}"{{.}}", {{end}}),
+							},
+							{{- else if or (len .StringPatterns) (ne .StringMinLength 0) (ne .StringMaxLength 0) }}
+							Validators: []validator.String{
+								{{- if or (ne .StringMinLength 0) (ne .StringMaxLength 0)}}
+								stringvalidator.LengthBetween({{.StringMinLength}}, {{.StringMaxLength}}),
+								{{- end}}
+								{{- range .StringPatterns}}
+								stringvalidator.RegexMatches(regexp.MustCompile(`{{.}}`), ""),
+								{{- end}}
+							},
+							{{- else if or (ne .MinInt 0) (ne .MaxInt 0)}}
+							Validators: []validator.Int64{
+								int64validator.Between({{.MinInt}}, {{.MaxInt}}),
+							},
+							{{- end}}
+							{{- if and (len .DefaultValue) (eq .Type "Int64")}}
+							Default:             int64default.StaticInt64({{.DefaultValue}}),
+							{{- else if and (len .DefaultValue) (eq .Type "Bool")}}
+							Default:             booldefault.StaticBool({{.DefaultValue}}),
+							{{- else if and (len .DefaultValue) (eq .Type "String")}}
+							Default:             stringdefault.StaticString("{{.DefaultValue}}"),
+							{{- end}}
+							{{- if eq .Type "List"}}
+							NestedObject: schema.NestedAttributeObject{
+								Attributes: map[string]schema.Attribute{
+									{{- range  .Attributes}}
+									"{{.TfName}}": schema.{{if or (eq .Type "StringList") (eq .Type "Int64List")}}List{{else}}{{.Type}}{{end}}Attribute{
+										MarkdownDescription: helpers.NewAttributeDescription("{{.Description}}")
+											{{- if len .EnumValues -}}
+											.AddStringEnumDescription({{range .EnumValues}}"{{.}}", {{end}})
+											{{- end -}}
+											{{- if or (ne .MinInt 0) (ne .MaxInt 0) -}}
+											.AddIntegerRangeDescription({{.MinInt}}, {{.MaxInt}})
+											{{- end -}}
+											{{- if or (ne .MinFloat 0.0) (ne .MaxFloat 0.0) -}}
+											.AddFloatRangeDescription({{.MinFloat}}, {{.MaxFloat}})
+											{{- end -}}
+											{{- if len .DefaultValue -}}
+											.AddDefaultValueDescription("{{.DefaultValue}}")
+											{{- end -}}
+											.String,
+										{{- if eq .Type "StringList"}}
+										ElementType:         types.StringType,
+										{{- else if eq .Type "Int64List"}}
+										ElementType:         types.Int64Type,
+										{{- end}}
+										{{- if or .Id .Mandatory}}
+										Required:            true,
+										{{- else}}
+										Optional:            true,
+										{{- end}}
+										{{- if len .DefaultValue}}
+										Computed:            true,
+										{{- end}}
+										{{- if len .EnumValues}}
+										Validators: []validator.String{
+											stringvalidator.OneOf({{range .EnumValues}}"{{.}}", {{end}}),
+										},
+										{{- else if or (len .StringPatterns) (ne .StringMinLength 0) (ne .StringMaxLength 0) }}
+										Validators: []validator.String{
+											{{- if or (ne .StringMinLength 0) (ne .StringMaxLength 0)}}
+											stringvalidator.LengthBetween({{.StringMinLength}}, {{.StringMaxLength}}),
+											{{- end}}
+											{{- range .StringPatterns}}
+											stringvalidator.RegexMatches(regexp.MustCompile(`{{.}}`), ""),
+											{{- end}}
+										},
+										{{- else if or (ne .MinInt 0) (ne .MaxInt 0)}}
+										Validators: []validator.Int64{
+											int64validator.Between({{.MinInt}}, {{.MaxInt}}),
+										},
+										{{- end}}
+										{{- if and (len .DefaultValue) (eq .Type "Int64")}}
+										Default:             int64default.StaticInt64({{.DefaultValue}}),
+										{{- else if and (len .DefaultValue) (eq .Type "Bool")}}
+										Default:             booldefault.StaticBool({{.DefaultValue}}),
+										{{- else if and (len .DefaultValue) (eq .Type "String")}}
+										Default:             stringdefault.StaticString("{{.DefaultValue}}"),
+										{{- end}}
+									},
+									{{- end}}
+								},
+							},
 							{{- end}}
 						},
 						{{- end}}
 					},
-					{{- end}}
-				}),
+				},
 				{{- end}}
 			},
 			{{- end}}
 		},
-	}, nil
+	}
 }
 
-func (t resource{{camelCase .Name}}Type) NewResource(ctx context.Context, in tfsdk.Provider) (tfsdk.Resource, diag.Diagnostics) {
-	provider, diags := convertProviderType(in)
+func (r *{{camelCase .Name}}Resource) Configure(_ context.Context, req resource.ConfigureRequest, _ *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
 
-	return resource{{camelCase .Name}}{
-		provider: provider,
-	}, diags
+	r.clients = req.ProviderData.(map[string]*restconf.Client)
 }
 
-type resource{{camelCase .Name}} struct {
-	provider provider
-}
-
-func (r resource{{camelCase .Name}}) Create(ctx context.Context, req tfsdk.CreateResourceRequest, resp *tfsdk.CreateResourceResponse) {
+func (r *{{camelCase .Name}}Resource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan {{camelCase .Name}}
 
 	// Read plan
@@ -167,34 +272,48 @@ func (r resource{{camelCase .Name}}) Create(ctx context.Context, req tfsdk.Creat
 		return
 	}
 
+	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Create", plan.getPath()))
 
 	// Create object
 	body := plan.toBody(ctx)
 
-	res, err := r.provider.clients[plan.Instance.Value].PatchData(plan.getPathShort(), body)
-	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.provider.clients[plan.Instance.Value].PutData(plan.getPath(), body)
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
-		return
-	}
-
 	emptyLeafsDelete := plan.getEmptyLeafsDelete(ctx)
 	tflog.Debug(ctx, fmt.Sprintf("List of empty leafs to delete: %+v", emptyLeafsDelete))
 
-	for _, i := range emptyLeafsDelete {
-		res, err := r.provider.clients[plan.Instance.Value].DeleteData(i)
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+	if YangPatch {
+		edits := []restconf.YangPatchEdit{restconf.NewYangPatchEdit("merge", plan.getPath(), restconf.Body{Str: body})}
+		for _, i := range emptyLeafsDelete {
+			edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+		}
+		_, err := r.clients[plan.Instance.ValueString()].YangPatchData("", "1", "", edits)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object, got error: %s", err))
 			return
 		}
+	} else {
+		res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
+		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
+			_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+			return
+		}
+		for _, i := range emptyLeafsDelete {
+			res, err := r.clients[plan.Instance.ValueString()].DeleteData(i)
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
+		}
 	}
-
-	plan.setUnknownValues()
 	
-	plan.Id = types.String{Value: plan.getPath()}
+	plan.Id = types.StringValue(plan.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Create finished successfully", plan.getPath()))
 
@@ -202,7 +321,7 @@ func (r resource{{camelCase .Name}}) Create(ctx context.Context, req tfsdk.Creat
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resource{{camelCase .Name}}) Read(ctx context.Context, req tfsdk.ReadResourceRequest, resp *tfsdk.ReadResourceResponse) {
+func (r *{{camelCase .Name}}Resource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state {{camelCase .Name}}
 
 	// Read state
@@ -212,9 +331,14 @@ func (r resource{{camelCase .Name}}) Read(ctx context.Context, req tfsdk.ReadRes
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.Id.Value))
+	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
+		return
+	}
 
-	res, err := r.provider.clients[state.Instance.Value].GetData(state.Id.Value, restconf.Query("content", "config"))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.Id.ValueString()))
+
+	res, err := r.clients[state.Instance.ValueString()].GetData(state.Id.ValueString(), restconf.Query("content", "config"))
 	if res.StatusCode == 404 {
 		state = {{camelCase .Name}}{Instance: state.Instance, Id: state.Id}
 	} else {
@@ -226,13 +350,13 @@ func (r resource{{camelCase .Name}}) Read(ctx context.Context, req tfsdk.ReadRes
 		state.updateFromBody(ctx, res.Res)
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", state.Id.Value))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", state.Id.ValueString()))
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resource{{camelCase .Name}}) Update(ctx context.Context, req tfsdk.UpdateResourceRequest, resp *tfsdk.UpdateResourceResponse) {
+func (r *{{camelCase .Name}}Resource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state {{camelCase .Name}}
 
 	// Read plan
@@ -249,49 +373,66 @@ func (r resource{{camelCase .Name}}) Update(ctx context.Context, req tfsdk.Updat
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.Id.Value))
-
-	body := plan.toBody(ctx)
-	res, err := r.provider.clients[plan.Instance.Value].PatchData(plan.getPathShort(), body)
-	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.provider.clients[plan.Instance.Value].PutData(plan.getPath(), body)
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
 		return
 	}
 
-	plan.setUnknownValues()
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.Id.ValueString()))
+
+	body := plan.toBody(ctx)
 
 	deletedListItems := plan.getDeletedListItems(ctx, state)
 	tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
 
-	for _, i := range deletedListItems {
-		res, err := r.provider.clients[state.Instance.Value].DeleteData(i)
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
-			return
-		}
-	}
-
 	emptyLeafsDelete := plan.getEmptyLeafsDelete(ctx)
 	tflog.Debug(ctx, fmt.Sprintf("List of empty leafs to delete: %+v", emptyLeafsDelete))
 
-	for _, i := range emptyLeafsDelete {
-		res, err := r.provider.clients[plan.Instance.Value].DeleteData(i)
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+	if YangPatch {
+		edits := []restconf.YangPatchEdit{restconf.NewYangPatchEdit("merge", plan.getPath(), restconf.Body{Str: body})}
+		for _, i := range deletedListItems {
+			edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+		}
+		for _, i := range emptyLeafsDelete {
+			edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+		}
+		_, err := r.clients[plan.Instance.ValueString()].YangPatchData("", "1", "", edits)
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update object, got error: %s", err))
 			return
+		}
+	} else {
+		res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
+		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
+			_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+			return
+		}
+		for _, i := range deletedListItems {
+			res, err := r.clients[state.Instance.ValueString()].DeleteData(i)
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
+		}
+		for _, i := range emptyLeafsDelete {
+			res, err := r.clients[plan.Instance.ValueString()].DeleteData(i)
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
 		}
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Update finished successfully", plan.Id.Value))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Update finished successfully", plan.Id.ValueString()))
 
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 }
 
-func (r resource{{camelCase .Name}}) Delete(ctx context.Context, req tfsdk.DeleteResourceRequest, resp *tfsdk.DeleteResourceResponse) {
+func (r *{{camelCase .Name}}Resource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state {{camelCase .Name}}
 
 	// Read state
@@ -301,19 +442,62 @@ func (r resource{{camelCase .Name}}) Delete(ctx context.Context, req tfsdk.Delet
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.Id.Value))
-{{ if not .NoDelete}}
-	res, err := r.provider.clients[state.Instance.Value].DeleteData(state.Id.Value)
-	if err != nil && res.StatusCode != 404 && res.StatusCode != 400 {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
 		return
 	}
-{{ end}}
-	tflog.Debug(ctx, fmt.Sprintf("%s: Delete finished successfully", state.Id.Value))
+
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.Id.ValueString()))
+
+	{{- if or .DefaultDeleteAttributes .NoDelete}}
+    deleteMode := "attributes"
+	{{- else}}
+	deleteMode := "all"
+	{{- end}}
+	{{- if and (not .NoDelete) (not .NoDeleteAttributes)}}
+	if state.DeleteMode.ValueString() == "all" {
+		deleteMode = "all"
+	} else if state.DeleteMode.ValueString() == "attributes" {
+		deleteMode = "attributes"
+	}
+	{{- end}}
+
+	if deleteMode == "all" {
+		res, err := r.clients[state.Instance.ValueString()].DeleteData(state.Id.ValueString())
+		if err != nil && res.StatusCode != 404 && res.StatusCode != 400 {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+			return
+		}
+	} else {
+		deletePaths := state.getDeletePaths(ctx)
+		tflog.Debug(ctx, fmt.Sprintf("Paths to delete: %+v", deletePaths))
+
+		if YangPatch {
+			edits := []restconf.YangPatchEdit{}
+			for _, i := range deletePaths {
+				edits = append(edits, restconf.NewYangPatchEdit("remove", i, restconf.Body{}))
+			}
+			_, err := r.clients[state.Instance.ValueString()].YangPatchData("", "1", "", edits)
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
+		} else {
+			for _, i := range deletePaths {
+				res, err := r.clients[state.Instance.ValueString()].DeleteData(i)
+				if err != nil && res.StatusCode != 404 {
+					resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+					return
+				}
+			}
+		}
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("%s: Delete finished successfully", state.Id.ValueString()))
 
 	resp.State.RemoveResource(ctx)
 }
 
-func (r resource{{camelCase .Name}}) ImportState(ctx context.Context, req tfsdk.ImportResourceStateRequest, resp *tfsdk.ImportResourceStateResponse) {
-	tfsdk.ResourceImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+func (r *{{camelCase .Name}}Resource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }

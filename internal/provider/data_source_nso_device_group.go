@@ -6,64 +6,74 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/netascode/go-restconf"
 )
 
-type dataSourceDeviceGroupType struct{}
+// Ensure the implementation satisfies the expected interfaces.
+var (
+	_ datasource.DataSource              = &DeviceGroupDataSource{}
+	_ datasource.DataSourceWithConfigure = &DeviceGroupDataSource{}
+)
 
-func (t dataSourceDeviceGroupType) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+func NewDeviceGroupDataSource() datasource.DataSource {
+	return &DeviceGroupDataSource{}
+}
+
+type DeviceGroupDataSource struct {
+	clients map[string]*restconf.Client
+}
+
+func (d *DeviceGroupDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_device_group"
+}
+
+func (d *DeviceGroupDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "This data source can read the Device Group configuration.",
 
-		Attributes: map[string]tfsdk.Attribute{
-			"instance": {
+		Attributes: map[string]schema.Attribute{
+			"instance": schema.StringAttribute{
 				MarkdownDescription: "An instance name from the provider configuration.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"id": {
+			"id": schema.StringAttribute{
 				MarkdownDescription: "The RESTCONF path.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
-			"name": {
+			"name": schema.StringAttribute{
 				MarkdownDescription: "Device group name.",
-				Type:                types.StringType,
 				Required:            true,
 			},
-			"device_names": {
+			"device_names": schema.ListAttribute{
 				MarkdownDescription: "A list of device names.",
-				Type:                types.ListType{ElemType: types.StringType},
+				ElementType:         types.StringType,
 				Computed:            true,
 			},
-			"device_groups": {
+			"device_groups": schema.ListAttribute{
 				MarkdownDescription: "A list of device groups.",
-				Type:                types.ListType{ElemType: types.StringType},
+				ElementType:         types.StringType,
 				Computed:            true,
 			},
 		},
-	}, nil
+	}
 }
 
-func (t dataSourceDeviceGroupType) NewDataSource(ctx context.Context, in tfsdk.Provider) (tfsdk.DataSource, diag.Diagnostics) {
-	provider, diags := convertProviderType(in)
+func (d *DeviceGroupDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, _ *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
 
-	return dataSourceDeviceGroup{
-		provider: provider,
-	}, diags
+	d.clients = req.ProviderData.(map[string]*restconf.Client)
 }
 
-type dataSourceDeviceGroup struct {
-	provider provider
-}
-
-func (d dataSourceDeviceGroup) Read(ctx context.Context, req tfsdk.ReadDataSourceRequest, resp *tfsdk.ReadDataSourceResponse) {
-	var config DeviceGroup
+func (d *DeviceGroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config DeviceGroupData
 
 	// Read config
 	diags := req.Config.Get(ctx, &config)
@@ -72,11 +82,16 @@ func (d dataSourceDeviceGroup) Read(ctx context.Context, req tfsdk.ReadDataSourc
 		return
 	}
 
+	if _, ok := d.clients[config.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", config.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", config.getPath()))
 
-	res, err := d.provider.clients[config.Instance.Value].GetData(config.getPath(), restconf.Query("content", "config"))
+	res, err := d.clients[config.Instance.ValueString()].GetData(config.getPath(), restconf.Query("content", "config"))
 	if res.StatusCode == 404 {
-		config = DeviceGroup{Instance: config.Instance}
+		config = DeviceGroupData{Instance: config.Instance}
 	} else {
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
@@ -86,7 +101,7 @@ func (d dataSourceDeviceGroup) Read(ctx context.Context, req tfsdk.ReadDataSourc
 		config.fromBody(ctx, res.Res)
 	}
 
-	config.Id = types.String{Value: config.getPath()}
+	config.Id = types.StringValue(config.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", config.getPath()))
 

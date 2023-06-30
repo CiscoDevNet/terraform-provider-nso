@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-	"github.com/netascode/terraform-provider-nso/internal/provider"
 )
 
 // Run "go generate" to format example terraform files and generate the docs for the registry/website
@@ -15,6 +15,9 @@ import (
 
 // Run the resource and datasource generation tool.
 //go:generate go run gen/generator.go
+
+// Format code and cleanup imports
+//go:generate go run golang.org/x/tools/cmd/goimports -w internal/provider/
 
 // If you do not have terraform installed, you can remove the formatting command, but its suggested to
 // ensure the documentation is formatted properly.
@@ -38,7 +41,7 @@ var (
 
 func main() {
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/netascode/nso",
+		Address: "registry.terraform.io/CiscoDevNet/nso",
 	}
 
 	err := providerserver.Serve(context.Background(), provider.New(version), opts)

@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"go/format"
 	"io/ioutil"
 	"log"
 	"math"
@@ -80,17 +79,19 @@ var templates = []t{
 }
 
 type YamlConfig struct {
-	Name              string                `yaml:"name"`
-	Path              string                `yaml:"path"`
-	AugmentPath       string                `yaml:"augment_path"`
-	NoDelete          bool                  `yaml:"no_delete"`
-	ExcludeTest       bool                  `yaml:"exclude_test"`
-	NoAugmentConfig   bool                  `yaml:"no_augment_config"`
-	DsDescription     string                `yaml:"ds_description"`
-	ResDescription    string                `yaml:"res_description"`
-	DocCategory       string                `yaml:"doc_category"`
-	Attributes        []YamlConfigAttribute `yaml:"attributes"`
-	TestPrerequisites []YamlTest            `yaml:"test_prerequisites"`
+	Name                    string                `yaml:"name"`
+	Path                    string                `yaml:"path"`
+	AugmentPath             string                `yaml:"augment_path"`
+	NoDelete                bool                  `yaml:"no_delete"`
+	NoDeleteAttributes      bool                  `yaml:"no_delete_attributes"`
+	DefaultDeleteAttributes bool                  `yaml:"default_delete_attributes"`
+	ExcludeTest             bool                  `yaml:"exclude_test"`
+	NoAugmentConfig         bool                  `yaml:"no_augment_config"`
+	DsDescription           string                `yaml:"ds_description"`
+	ResDescription          string                `yaml:"res_description"`
+	DocCategory             string                `yaml:"doc_category"`
+	Attributes              []YamlConfigAttribute `yaml:"attributes"`
+	TestPrerequisites       []YamlTest            `yaml:"test_prerequisites"`
 }
 
 type YamlConfigAttribute struct {
@@ -101,7 +102,6 @@ type YamlConfigAttribute struct {
 	Type      string `yaml:"type"`
 	// "empty", "presence" or "boolean"
 	TypeYangBool    string                `yaml:"type_yang_bool"`
-	ListElement     string                `yaml:"list_element"`
 	Id              bool                  `yaml:"id"`
 	Reference       bool                  `yaml:"reference"`
 	Mandatory       bool                  `yaml:"mandatory"`
@@ -114,11 +114,16 @@ type YamlConfigAttribute struct {
 	EnumValues      []string              `yaml:"enum_values"`
 	MinInt          int64                 `yaml:"min_int"`
 	MaxInt          int64                 `yaml:"max_int"`
+	MinFloat        float64               `yaml:"min_float"`
+	MaxFloat        float64               `yaml:"max_float"`
 	StringPatterns  []string              `yaml:"string_patterns"`
 	StringMinLength int64                 `yaml:"string_min_length"`
 	StringMaxLength int64                 `yaml:"string_max_length"`
 	DefaultValue    string                `yaml:"default_value"`
 	RequiresReplace bool                  `yaml:"requires_replace"`
+	NoAugmentConfig bool                  `yaml:"no_augment_config"`
+	DeleteParent    bool                  `yaml:"delete_parent"`
+	NoDelete        bool                  `yaml:"no_delete"`
 	Attributes      []YamlConfigAttribute `yaml:"attributes"`
 }
 
@@ -225,6 +230,19 @@ func IsLast(index int, len int) bool {
 	return index+1 == len
 }
 
+// Templating helper function to remove last element of path
+func RemoveLastPathElement(p string) string {
+	return path.Dir(p)
+}
+
+// Templating helper function to get xpath if available
+func GetXPath(yangPath, xPath string) string {
+	if xPath != "" {
+		return xPath
+	}
+	return yangPath
+}
+
 func contains(s []string, str string) bool {
 	for _, v := range s {
 		if v == str {
@@ -236,14 +254,16 @@ func contains(s []string, str string) bool {
 
 // Map of templating functions
 var functions = template.FuncMap{
-	"toGoName":       ToGoName,
-	"toJsonPath":     ToJsonPath,
-	"camelCase":      CamelCase,
-	"snakeCase":      SnakeCase,
-	"hasId":          HasId,
-	"getExamplePath": GetExamplePath,
-	"isLast":         IsLast,
-	"sprintf":        fmt.Sprintf,
+	"toGoName":              ToGoName,
+	"toJsonPath":            ToJsonPath,
+	"camelCase":             CamelCase,
+	"snakeCase":             SnakeCase,
+	"hasId":                 HasId,
+	"getExamplePath":        GetExamplePath,
+	"isLast":                IsLast,
+	"sprintf":               fmt.Sprintf,
+	"removeLastPathElement": RemoveLastPathElement,
+	"getXPath":              GetXPath,
 }
 
 func resolvePath(e *yang.Entry, path string) *yang.Entry {
@@ -311,10 +331,18 @@ func addKeys(e *yang.Entry, config *YamlConfig) {
 func parseAttribute(e *yang.Entry, attr *YamlConfigAttribute) {
 	leaf := resolvePath(e, attr.YangName)
 	//fmt.Printf("%s, Entry: %+v\n\n", attr.YangName, e)
-	//fmt.Printf("%s, Kind: %+v, Type: %+v\n\n", leaf.Name, leaf.Kind, leaf.Type)
+	//fmt.Printf("%s, Kind: %+v, ListAttr: %+v, Type: %+v\n\n", leaf.Name, leaf.Kind, leaf.ListAttr, leaf.Type)
 	if leaf.Kind.String() == "Leaf" {
-		// TODO parse union type
-		if contains([]string{"string", "union", "leafref"}, leaf.Type.Kind.String()) {
+		if leaf.ListAttr != nil {
+			if contains([]string{"string", "union", "leafref"}, leaf.Type.Kind.String()) {
+				attr.Type = "StringList"
+			} else if contains([]string{"uint8", "uint16", "uint32", "uint64"}, leaf.Type.Kind.String()) {
+				attr.Type = "Int64List"
+			} else {
+				panic(fmt.Sprintf("Unknown leaf-list type, attribute: %s, type: %s", attr.YangName, leaf.Type.Kind.String()))
+			}
+			// TODO parse union type
+		} else if contains([]string{"string", "union", "leafref"}, leaf.Type.Kind.String()) {
 			attr.Type = "String"
 			if leaf.Type.Length != nil {
 				attr.StringMinLength = int64(leaf.Type.Length[0].Min.Value)
@@ -334,6 +362,12 @@ func parseAttribute(e *yang.Entry, attr *YamlConfigAttribute) {
 				}
 				attr.MaxInt = int64(max)
 			}
+		} else if contains([]string{"decimal8", "decimal16", "decimal32", "decimal64"}, leaf.Type.Kind.String()) {
+			attr.Type = "Float64"
+			if leaf.Type.Range != nil {
+				attr.MinFloat = float64(leaf.Type.Range[0].Min.Value)
+				attr.MaxFloat = float64(leaf.Type.Range[0].Max.Value)
+			}
 		} else if contains([]string{"boolean", "empty"}, leaf.Type.Kind.String()) {
 			if leaf.Type.Kind.String() == "boolean" {
 				attr.TypeYangBool = "boolean"
@@ -344,6 +378,8 @@ func parseAttribute(e *yang.Entry, attr *YamlConfigAttribute) {
 		} else if contains([]string{"enumeration"}, leaf.Type.Kind.String()) {
 			attr.Type = "String"
 			attr.EnumValues = leaf.Type.Enum.Names()
+		} else {
+			panic(fmt.Sprintf("Unknown leaf type, attribute: %s, type: %s", attr.YangName, leaf.Type.Kind.String()))
 		}
 	}
 	if _, ok := leaf.Extra["presence"]; ok {
@@ -359,7 +395,18 @@ func parseAttribute(e *yang.Entry, attr *YamlConfigAttribute) {
 		attr.Description = strings.ReplaceAll(leaf.Description, "\n", " ")
 	}
 	if !attr.Mandatory && attr.DefaultValue == "" && !attr.Optional {
-		attr.Mandatory = leaf.Mandatory.Value()
+		foundChoice := false
+		parent := leaf.Parent
+		for parent != nil {
+			if parent.IsChoice() {
+				foundChoice = true
+				break
+			}
+			parent = parent.Parent
+		}
+		if !foundChoice {
+			attr.Mandatory = leaf.Mandatory.Value()
+		}
 	}
 }
 
@@ -384,14 +431,26 @@ func augmentConfig(config *YamlConfig, modelPaths []string) {
 	addKeys(e, config)
 
 	for ia := range config.Attributes {
-		if config.Attributes[ia].Id || config.Attributes[ia].Reference {
+		if config.Attributes[ia].Id || config.Attributes[ia].Reference || config.Attributes[ia].NoAugmentConfig {
 			continue
 		}
 		parseAttribute(e, &config.Attributes[ia])
 		if config.Attributes[ia].Type == "List" {
 			el := resolvePath(e, config.Attributes[ia].YangName)
 			for iaa := range config.Attributes[ia].Attributes {
+				if config.Attributes[ia].Attributes[iaa].NoAugmentConfig {
+					continue
+				}
 				parseAttribute(el, &config.Attributes[ia].Attributes[iaa])
+				if config.Attributes[ia].Attributes[iaa].Type == "List" {
+					ell := resolvePath(el, config.Attributes[ia].Attributes[iaa].YangName)
+					for iaaa := range config.Attributes[ia].Attributes[iaa].Attributes {
+						if config.Attributes[ia].Attributes[iaa].Attributes[iaaa].NoAugmentConfig {
+							continue
+						}
+						parseAttribute(ell, &config.Attributes[ia].Attributes[iaa].Attributes[iaaa])
+					}
+				}
 			}
 		}
 	}
@@ -439,17 +498,7 @@ func renderTemplate(templatePath, outputPath string, config interface{}) {
 	if err != nil {
 		log.Fatalf("Error executing template: %v", err)
 	}
-
-	// format go code
-	if strings.HasSuffix(templatePath, ".gx") {
-		fOutput, err := format.Source(output.Bytes())
-		if err != nil {
-			log.Fatalf("Error formatting go in %s: %v", templatePath, err)
-		}
-		f.Write(fOutput)
-	} else {
-		f.Write(output.Bytes())
-	}
+	f.Write(output.Bytes())
 }
 
 func main() {

@@ -32,9 +32,7 @@ resource "nso_restconf" "customer" {
       key  = "id"
       items = [
         {
-          attributes = {
-            id = 123
-          }
+          id = 123
         }
       ]
     }
@@ -72,38 +70,31 @@ resource "nso_restconf" "nested_attribute" {
 
 ### Required
 
-- `path` (String) A RESTCONF path, e.g. `tailf-ncs:ssh`.
+- `path` (String) A RESTCONF path.
 
 ### Optional
 
-- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.
+- `attributes` (Map of String) Map of key-value pairs which represents the YANG leafs and its values.
 - `delete` (Boolean) Delete object during destroy operation. Default value is `true`.
 - `instance` (String) An instance name from the provider configuration.
 - `lists` (Attributes List) YANG lists. (see [below for nested schema](#nestedatt--lists))
 
 ### Read-Only
 
-- `id` (String) The RESTCONF path of the configuration.
+- `id` (String) The RESTCONF path.
 
 <a id="nestedatt--lists"></a>
 ### Nested Schema for `lists`
 
 Required:
 
-- `name` (String) YANG list name. Nested lists (in YANG containers) can be specified using `/` as delimiter.
+- `name` (String) YANG list name.
 
 Optional:
 
-- `items` (Attributes List) Items of YANG lists. (see [below for nested schema](#nestedatt--lists--items))
-- `key` (String) YANG list key attribute.
+- `items` (List of Map of String) List of maps of key-value pairs which represents the YANG leafs and its values.
+- `key` (String) YANG list key attribute. In case of multiple keys, those should be separated by a comma (`,`).
 - `values` (List of String) YANG leaf-list values.
-
-<a id="nestedatt--lists--items"></a>
-### Nested Schema for `lists.items`
-
-Optional:
-
-- `attributes` (Map of String) Map of key-value pairs which represents the attributes and its values. Nested attributes (in YANG containers) can be specified using `/` as delimiter.
 
 ## Import
 

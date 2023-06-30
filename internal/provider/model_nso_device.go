@@ -4,30 +4,48 @@ package provider
 
 import (
 	"context"
-	"regexp"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/netascode/terraform-provider-nso/internal/provider/helpers"
-	"github.com/tidwall/sjson"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
+
 type Device struct {
-	Instance types.String `tfsdk:"instance"`
-	Id       types.String `tfsdk:"id"`
-	Name types.String `tfsdk:"name"`
-	Address types.String `tfsdk:"address"`
-	Port types.Int64 `tfsdk:"port"`
-	Authgroup types.String `tfsdk:"authgroup"`
-	AdminState types.String `tfsdk:"admin_state"`
+	Instance     types.String `tfsdk:"instance"`
+	Id           types.String `tfsdk:"id"`
+	DeleteMode   types.String `tfsdk:"delete_mode"`
+	Name         types.String `tfsdk:"name"`
+	Address      types.String `tfsdk:"address"`
+	Port         types.Int64  `tfsdk:"port"`
+	Authgroup    types.String `tfsdk:"authgroup"`
+	AdminState   types.String `tfsdk:"admin_state"`
 	NetconfNetId types.String `tfsdk:"netconf_net_id"`
-	CliNedId types.String `tfsdk:"cli_ned_id"`
+	CliNedId     types.String `tfsdk:"cli_ned_id"`
+}
+
+type DeviceData struct {
+	Instance     types.String `tfsdk:"instance"`
+	Id           types.String `tfsdk:"id"`
+	Name         types.String `tfsdk:"name"`
+	Address      types.String `tfsdk:"address"`
+	Port         types.Int64  `tfsdk:"port"`
+	Authgroup    types.String `tfsdk:"authgroup"`
+	AdminState   types.String `tfsdk:"admin_state"`
+	NetconfNetId types.String `tfsdk:"netconf_net_id"`
+	CliNedId     types.String `tfsdk:"cli_ned_id"`
 }
 
 func (data Device) getPath() string {
-	return fmt.Sprintf("tailf-ncs:devices/device=%v", url.QueryEscape(fmt.Sprintf("%v", data.Name.Value)))
+	return fmt.Sprintf("tailf-ncs:devices/device=%v", url.QueryEscape(fmt.Sprintf("%v", data.Name.ValueString())))
+}
+
+func (data DeviceData) getPath() string {
+	return fmt.Sprintf("tailf-ncs:devices/device=%v", url.QueryEscape(fmt.Sprintf("%v", data.Name.ValueString())))
 }
 
 // if last path element has a key -> remove it
@@ -43,26 +61,26 @@ func (data Device) getPathShort() string {
 
 func (data Device) toBody(ctx context.Context) string {
 	body := `{"` + helpers.LastElement(data.getPath()) + `":{}}`
-	if !data.Name.Null && !data.Name.Unknown {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"name", data.Name.Value)
+	if !data.Name.IsNull() && !data.Name.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"name", data.Name.ValueString())
 	}
-	if !data.Address.Null && !data.Address.Unknown {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"address", data.Address.Value)
+	if !data.Address.IsNull() && !data.Address.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"address", data.Address.ValueString())
 	}
-	if !data.Port.Null && !data.Port.Unknown {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"port", strconv.FormatInt(data.Port.Value, 10))
+	if !data.Port.IsNull() && !data.Port.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"port", strconv.FormatInt(data.Port.ValueInt64(), 10))
 	}
-	if !data.Authgroup.Null && !data.Authgroup.Unknown {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"authgroup", data.Authgroup.Value)
+	if !data.Authgroup.IsNull() && !data.Authgroup.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"authgroup", data.Authgroup.ValueString())
 	}
-	if !data.AdminState.Null && !data.AdminState.Unknown {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"state.admin-state", data.AdminState.Value)
+	if !data.AdminState.IsNull() && !data.AdminState.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"state.admin-state", data.AdminState.ValueString())
 	}
-	if !data.NetconfNetId.Null && !data.NetconfNetId.Unknown {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.netconf.ned-id", data.NetconfNetId.Value)
+	if !data.NetconfNetId.IsNull() && !data.NetconfNetId.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.netconf.ned-id", data.NetconfNetId.ValueString())
 	}
-	if !data.CliNedId.Null && !data.CliNedId.Unknown {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.cli.ned-id", data.CliNedId.Value)
+	if !data.CliNedId.IsNull() && !data.CliNedId.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.cli.ned-id", data.CliNedId.ValueString())
 	}
 	return body
 }
@@ -72,110 +90,65 @@ func (data *Device) updateFromBody(ctx context.Context, res gjson.Result) {
 	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
 		prefix += "0."
 	}
-	if value := res.Get(prefix+"name"); value.Exists() {
-		data.Name.Value = value.String()
+	if value := res.Get(prefix + "name"); value.Exists() && !data.Name.IsNull() {
+		data.Name = types.StringValue(value.String())
 	} else {
-		data.Name.Null = true
+		data.Name = types.StringNull()
 	}
-	if value := res.Get(prefix+"address"); value.Exists() {
-		data.Address.Value = value.String()
+	if value := res.Get(prefix + "address"); value.Exists() && !data.Address.IsNull() {
+		data.Address = types.StringValue(value.String())
 	} else {
-		data.Address.Null = true
+		data.Address = types.StringNull()
 	}
-	if value := res.Get(prefix+"port"); value.Exists() {
-		data.Port.Value = value.Int()
+	if value := res.Get(prefix + "port"); value.Exists() && !data.Port.IsNull() {
+		data.Port = types.Int64Value(value.Int())
 	} else {
-		data.Port.Null = true
+		data.Port = types.Int64Null()
 	}
-	if value := res.Get(prefix+"authgroup"); value.Exists() {
-		data.Authgroup.Value = value.String()
+	if value := res.Get(prefix + "authgroup"); value.Exists() && !data.Authgroup.IsNull() {
+		data.Authgroup = types.StringValue(value.String())
 	} else {
-		data.Authgroup.Null = true
+		data.Authgroup = types.StringNull()
 	}
-	if value := res.Get(prefix+"state.admin-state"); value.Exists() {
-		data.AdminState.Value = value.String()
+	if value := res.Get(prefix + "state.admin-state"); value.Exists() && !data.AdminState.IsNull() {
+		data.AdminState = types.StringValue(value.String())
 	} else {
-		data.AdminState.Null = true
+		data.AdminState = types.StringNull()
 	}
-	if value := res.Get(prefix+"device-type.netconf.ned-id"); value.Exists() {
-		data.NetconfNetId.Value = value.String()
+	if value := res.Get(prefix + "device-type.netconf.ned-id"); value.Exists() && !data.NetconfNetId.IsNull() {
+		data.NetconfNetId = types.StringValue(value.String())
 	} else {
-		data.NetconfNetId.Null = true
+		data.NetconfNetId = types.StringNull()
 	}
-	if value := res.Get(prefix+"device-type.cli.ned-id"); value.Exists() {
-		data.CliNedId.Value = value.String()
+	if value := res.Get(prefix + "device-type.cli.ned-id"); value.Exists() && !data.CliNedId.IsNull() {
+		data.CliNedId = types.StringValue(value.String())
 	} else {
-		data.CliNedId.Null = true
+		data.CliNedId = types.StringNull()
 	}
 }
 
-func (data *Device) fromBody(ctx context.Context, res gjson.Result) {
+func (data *DeviceData) fromBody(ctx context.Context, res gjson.Result) {
 	prefix := helpers.LastElement(data.getPath()) + "."
 	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
 		prefix += "0."
 	}
-	if value := res.Get(prefix+"address"); value.Exists() {
-		data.Address.Value = value.String()
-		data.Address.Null = false
+	if value := res.Get(prefix + "address"); value.Exists() {
+		data.Address = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix+"port"); value.Exists() {
-		data.Port.Value = value.Int()
-		data.Port.Null = false
+	if value := res.Get(prefix + "port"); value.Exists() {
+		data.Port = types.Int64Value(value.Int())
 	}
-	if value := res.Get(prefix+"authgroup"); value.Exists() {
-		data.Authgroup.Value = value.String()
-		data.Authgroup.Null = false
+	if value := res.Get(prefix + "authgroup"); value.Exists() {
+		data.Authgroup = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix+"state.admin-state"); value.Exists() {
-		data.AdminState.Value = value.String()
-		data.AdminState.Null = false
+	if value := res.Get(prefix + "state.admin-state"); value.Exists() {
+		data.AdminState = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix+"device-type.netconf.ned-id"); value.Exists() {
-		data.NetconfNetId.Value = value.String()
-		data.NetconfNetId.Null = false
+	if value := res.Get(prefix + "device-type.netconf.ned-id"); value.Exists() {
+		data.NetconfNetId = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix+"device-type.cli.ned-id"); value.Exists() {
-		data.CliNedId.Value = value.String()
-		data.CliNedId.Null = false
-	}
-}
-
-func (data *Device) setUnknownValues() {
-	if data.Instance.Unknown {
-		data.Instance.Unknown = false
-		data.Instance.Null = true
-	}
-	if data.Id.Unknown {
-		data.Id.Unknown = false
-		data.Id.Null = true
-	}
-	if data.Name.Unknown {
-		data.Name.Unknown = false
-		data.Name.Null = true
-	}
-	if data.Address.Unknown {
-		data.Address.Unknown = false
-		data.Address.Null = true
-	}
-	if data.Port.Unknown {
-		data.Port.Unknown = false
-		data.Port.Null = true
-	}
-	if data.Authgroup.Unknown {
-		data.Authgroup.Unknown = false
-		data.Authgroup.Null = true
-	}
-	if data.AdminState.Unknown {
-		data.AdminState.Unknown = false
-		data.AdminState.Null = true
-	}
-	if data.NetconfNetId.Unknown {
-		data.NetconfNetId.Unknown = false
-		data.NetconfNetId.Null = true
-	}
-	if data.CliNedId.Unknown {
-		data.CliNedId.Unknown = false
-		data.CliNedId.Null = true
+	if value := res.Get(prefix + "device-type.cli.ned-id"); value.Exists() {
+		data.CliNedId = types.StringValue(value.String())
 	}
 }
 
@@ -187,4 +160,27 @@ func (data *Device) getDeletedListItems(ctx context.Context, state Device) []str
 func (data *Device) getEmptyLeafsDelete(ctx context.Context) []string {
 	emptyLeafsDelete := make([]string, 0)
 	return emptyLeafsDelete
+}
+
+func (data *Device) getDeletePaths(ctx context.Context) []string {
+	var deletePaths []string
+	if !data.Address.IsNull() {
+		deletePaths = append(deletePaths, fmt.Sprintf("%v/address", data.getPath()))
+	}
+	if !data.Port.IsNull() {
+		deletePaths = append(deletePaths, fmt.Sprintf("%v/port", data.getPath()))
+	}
+	if !data.Authgroup.IsNull() {
+		deletePaths = append(deletePaths, fmt.Sprintf("%v/authgroup", data.getPath()))
+	}
+	if !data.AdminState.IsNull() {
+		deletePaths = append(deletePaths, fmt.Sprintf("%v/state/admin-state", data.getPath()))
+	}
+	if !data.NetconfNetId.IsNull() {
+		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-type/netconf/ned-id", data.getPath()))
+	}
+	if !data.CliNedId.IsNull() {
+		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-type/cli/ned-id", data.getPath()))
+	}
+	return deletePaths
 }

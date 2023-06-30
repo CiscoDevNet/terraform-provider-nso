@@ -9,73 +9,109 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/netascode/go-restconf"
 )
 
-type dataSource{{camelCase .Name}}Type struct{}
+// Ensure the implementation satisfies the expected interfaces.
+var (
+	_ datasource.DataSource              = &{{camelCase .Name}}DataSource{}
+	_ datasource.DataSourceWithConfigure = &{{camelCase .Name}}DataSource{}
+)
 
-func (t dataSource{{camelCase .Name}}Type) GetSchema(ctx context.Context) (tfsdk.Schema, diag.Diagnostics) {
-	return tfsdk.Schema{
+func New{{camelCase .Name}}DataSource() datasource.DataSource {
+	return &{{camelCase .Name}}DataSource{}
+}
+
+type {{camelCase .Name}}DataSource struct {
+	clients map[string]*restconf.Client
+}
+
+func (d *{{camelCase .Name}}DataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_{{snakeCase .Name}}"
+}
+
+func (d *{{camelCase .Name}}DataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
 		MarkdownDescription: "{{.DsDescription}}",
 
-		Attributes: map[string]tfsdk.Attribute{
-			"instance": {
+		Attributes: map[string]schema.Attribute{
+			"instance": schema.StringAttribute{
 				MarkdownDescription: "An instance name from the provider configuration.",
-				Type:                types.StringType,
 				Optional:            true,
 			},
-			"id": {
+			"id": schema.StringAttribute{
 				MarkdownDescription: "The RESTCONF path.",
-				Type:                types.StringType,
 				Computed:            true,
 			},
 			{{- range  .Attributes}}
-			"{{.TfName}}": {
+			"{{.TfName}}": schema.{{if eq .Type "List"}}ListNested{{else if or (eq .Type "StringList") (eq .Type "Int64List")}}List{{else}}{{.Type}}{{end}}Attribute{
 				MarkdownDescription: "{{.Description}}",
-				{{- if ne .Type "List"}}
-				Type:                types.{{.Type}}Type,
-				{{- else if and (eq .Type "List") (eq .ListElement "String")}}
-				Type:                types.ListType{ElemType: types.StringType},
+				{{- if eq .Type "StringList"}}
+				ElementType:         types.StringType,
+				{{- else if eq .Type "Int64List"}}
+				ElementType:         types.Int64Type,
 				{{- end}}
-				{{- if or (eq .Id true) (eq .Reference true)}}
+				{{- if or .Id .Reference}}
 				Required:            true,
 				{{- else}}
 				Computed:            true,
 				{{- end}}
-				{{- if and (eq .Type "List") (ne .ListElement "String")}}
-				Attributes: tfsdk.ListNestedAttributes(map[string]tfsdk.Attribute{
-					{{- range  .Attributes}}
-					"{{.TfName}}": {
-						MarkdownDescription: "{{.Description}}",
-						Type:                types.{{.Type}}Type,
-						Computed:            true,
+				{{- if eq .Type "List"}}
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						{{- range  .Attributes}}
+						"{{.TfName}}": schema.{{if eq .Type "List"}}ListNested{{else if or (eq .Type "StringList") (eq .Type "Int64List")}}List{{else}}{{.Type}}{{end}}Attribute{
+							MarkdownDescription: "{{.Description}}",
+							{{- if eq .Type "StringList"}}
+							ElementType:         types.StringType,
+							{{- else if eq .Type "Int64List"}}
+							ElementType:         types.Int64Type,
+							{{- end}}
+							Computed:            true,
+							{{- if eq .Type "List"}}
+							NestedObject: schema.NestedAttributeObject{
+								Attributes: map[string]schema.Attribute{
+									{{- range  .Attributes}}
+									"{{.TfName}}": schema.{{if or (eq .Type "StringList") (eq .Type "Int64List")}}List{{else}}{{.Type}}{{end}}Attribute{
+										MarkdownDescription: "{{.Description}}",
+										{{- if eq .Type "StringList"}}
+										ElementType:         types.StringType,
+										{{- else if eq .Type "Int64List"}}
+										ElementType:         types.Int64Type,
+										{{- end}}
+										Computed:            true,
+									},
+									{{- end}}
+								},
+							},
+							{{- end}}
+						},
+						{{- end}}
 					},
-					{{- end}}
-				}, tfsdk.ListNestedAttributesOptions{}),
+				},
 				{{- end}}
 			},
 			{{- end}}
 		},
-	}, nil
+	}
 }
 
-func (t dataSource{{camelCase .Name}}Type) NewDataSource(ctx context.Context, in tfsdk.Provider) (tfsdk.DataSource, diag.Diagnostics) {
-	provider, diags := convertProviderType(in)
+func (d *{{camelCase .Name}}DataSource) Configure(_ context.Context, req datasource.ConfigureRequest, _ *datasource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
 
-	return dataSource{{camelCase .Name}}{
-		provider: provider,
-	}, diags
+	d.clients = req.ProviderData.(map[string]*restconf.Client)
 }
 
-type dataSource{{camelCase .Name}} struct {
-	provider provider
-}
-
-func (d dataSource{{camelCase .Name}}) Read(ctx context.Context, req tfsdk.ReadDataSourceRequest, resp *tfsdk.ReadDataSourceResponse) {
-	var config {{camelCase .Name}}
+func (d *{{camelCase .Name}}DataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	var config {{camelCase .Name}}Data
 
 	// Read config
 	diags := req.Config.Get(ctx, &config)
@@ -84,11 +120,16 @@ func (d dataSource{{camelCase .Name}}) Read(ctx context.Context, req tfsdk.ReadD
 		return
 	}
 
+	if _, ok := d.clients[config.Instance.ValueString()]; !ok {
+		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", config.Instance.ValueString()))
+		return
+	}
+
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", config.getPath()))
 
-	res, err := d.provider.clients[config.Instance.Value].GetData(config.getPath(), restconf.Query("content", "config"))
+	res, err := d.clients[config.Instance.ValueString()].GetData(config.getPath(), restconf.Query("content", "config"))
 	if res.StatusCode == 404 {
-		config = {{camelCase .Name}}{Instance: config.Instance}
+		config = {{camelCase .Name}}Data{Instance: config.Instance}
 	} else {
 		if err != nil {
 			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
@@ -98,7 +139,7 @@ func (d dataSource{{camelCase .Name}}) Read(ctx context.Context, req tfsdk.ReadD
 		config.fromBody(ctx, res.Res)
 	}
 
-	config.Id = types.String{Value: config.getPath()}
+	config.Id = types.StringValue(config.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", config.getPath()))
 
