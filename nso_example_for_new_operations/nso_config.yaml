@@ -1,0 +1,21 @@
+# nso_config.yaml
+# NSO Device Configuration for workflow Testing
+
+tailf-ncs:devices:
+  device:
+    - name: ce0
+      config:
+        tailf-ned-cisco-ios-xr:hostname: hostname-ce0
+    
+    - name: ce1
+      config:
+        tailf-ned-cisco-ios-xr:interface:
+          GigabitEthernet:
+            - id: "0/0"
+              description: "Test interface"
+    
+    - name: ce2
+      config:
+        tailf-ned-cisco-ios-xr:vlan:
+          vlan-list:
+            id: "1"
