@@ -24,9 +24,6 @@ import (
 	"regexp"
 	"fmt"
 	"net/url"
-	"strconv"
-	"reflect"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"

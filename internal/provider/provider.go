@@ -21,7 +21,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strconv"
 
@@ -33,7 +32,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/netascode/go-restconf"
-	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 )
 
 const (
