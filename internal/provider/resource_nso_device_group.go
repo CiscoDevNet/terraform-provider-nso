@@ -23,15 +23,23 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/netascode/go-restconf"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 )
 
 func NewDeviceGroupResource() resource.Resource {
@@ -142,7 +150,7 @@ func (r *DeviceGroupResource) Create(ctx context.Context, req resource.CreateReq
 			}
 		}
 	}
-
+	
 	plan.Id = types.StringValue(plan.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Create finished successfully", plan.getPath()))

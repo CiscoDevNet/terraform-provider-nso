@@ -23,6 +23,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -89,6 +91,10 @@ func (d *DeviceDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 			},
 			"cli_ned_id": schema.StringAttribute{
 				MarkdownDescription: "CLI NED ID.",
+				Computed:            true,
+			},
+			"generic_ned_id": schema.StringAttribute{
+				MarkdownDescription: "Generic NED ID.",
 				Computed:            true,
 			},
 		},

@@ -21,6 +21,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/netascode/go-restconf"
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 )
 
 const (
@@ -48,12 +50,12 @@ type NsoProvider struct {
 
 // NsoProviderModel describes the provider data model.
 type NsoProviderModel struct {
-	Username  types.String               `tfsdk:"username"`
-	Password  types.String               `tfsdk:"password"`
-	URL       types.String               `tfsdk:"url"`
-	Insecure  types.Bool                 `tfsdk:"insecure"`
-	Retries   types.Int64                `tfsdk:"retries"`
-	Instances []NsoProviderModelInstance `tfsdk:"instances"`
+	Username types.String         `tfsdk:"username"`
+	Password types.String         `tfsdk:"password"`
+	URL      types.String         `tfsdk:"url"`
+	Insecure types.Bool           `tfsdk:"insecure"`
+	Retries  types.Int64          `tfsdk:"retries"`
+	Instances  []NsoProviderModelInstance `tfsdk:"instances"`
 }
 
 type NsoProviderModelInstance struct {
