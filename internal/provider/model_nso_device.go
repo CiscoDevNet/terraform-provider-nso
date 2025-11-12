@@ -21,39 +21,40 @@ package provider
 
 import (
 	"context"
+	"regexp"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strconv"
 
-	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/tidwall/gjson"
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/tidwall/sjson"
+	"github.com/tidwall/gjson"
 )
-
 type Device struct {
-	Instance     types.String `tfsdk:"instance"`
-	Id           types.String `tfsdk:"id"`
-	Name         types.String `tfsdk:"name"`
-	Address      types.String `tfsdk:"address"`
-	Port         types.Int64  `tfsdk:"port"`
-	Authgroup    types.String `tfsdk:"authgroup"`
-	AdminState   types.String `tfsdk:"admin_state"`
+	Instance types.String `tfsdk:"instance"`
+	Id     types.String `tfsdk:"id"`
+	Name types.String `tfsdk:"name"`
+	Address types.String `tfsdk:"address"`
+	Port types.Int64 `tfsdk:"port"`
+	Authgroup types.String `tfsdk:"authgroup"`
+	AdminState types.String `tfsdk:"admin_state"`
 	NetconfNetId types.String `tfsdk:"netconf_net_id"`
-	CliNedId     types.String `tfsdk:"cli_ned_id"`
+	CliNedId types.String `tfsdk:"cli_ned_id"`
+	GenericNedId types.String `tfsdk:"generic_ned_id"`
 }
 
 type DeviceData struct {
-	Instance     types.String `tfsdk:"instance"`
-	Id           types.String `tfsdk:"id"`
-	Name         types.String `tfsdk:"name"`
-	Address      types.String `tfsdk:"address"`
-	Port         types.Int64  `tfsdk:"port"`
-	Authgroup    types.String `tfsdk:"authgroup"`
-	AdminState   types.String `tfsdk:"admin_state"`
+	Instance types.String `tfsdk:"instance"`
+	Id     types.String `tfsdk:"id"`
+	Name types.String `tfsdk:"name"`
+	Address types.String `tfsdk:"address"`
+	Port types.Int64 `tfsdk:"port"`
+	Authgroup types.String `tfsdk:"authgroup"`
+	AdminState types.String `tfsdk:"admin_state"`
 	NetconfNetId types.String `tfsdk:"netconf_net_id"`
-	CliNedId     types.String `tfsdk:"cli_ned_id"`
+	CliNedId types.String `tfsdk:"cli_ned_id"`
+	GenericNedId types.String `tfsdk:"generic_ned_id"`
 }
 
 func (data Device) getPath() string {
@@ -98,6 +99,9 @@ func (data Device) toBody(ctx context.Context) string {
 	if !data.CliNedId.IsNull() && !data.CliNedId.IsUnknown() {
 		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.cli.ned-id", data.CliNedId.ValueString())
 	}
+	if !data.GenericNedId.IsNull() && !data.GenericNedId.IsUnknown() {
+		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.generic.ned-id", data.GenericNedId.ValueString())
+	}
 	return body
 }
 
@@ -106,40 +110,45 @@ func (data *Device) updateFromBody(ctx context.Context, res gjson.Result) {
 	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
 		prefix += "0."
 	}
-	if value := res.Get(prefix + "name"); value.Exists() && !data.Name.IsNull() {
+	if value := res.Get(prefix+"name"); value.Exists() && !data.Name.IsNull() {
 		data.Name = types.StringValue(value.String())
 	} else {
 		data.Name = types.StringNull()
 	}
-	if value := res.Get(prefix + "address"); value.Exists() && !data.Address.IsNull() {
+	if value := res.Get(prefix+"address"); value.Exists() && !data.Address.IsNull() {
 		data.Address = types.StringValue(value.String())
 	} else {
 		data.Address = types.StringNull()
 	}
-	if value := res.Get(prefix + "port"); value.Exists() && !data.Port.IsNull() {
+	if value := res.Get(prefix+"port"); value.Exists() && !data.Port.IsNull() {
 		data.Port = types.Int64Value(value.Int())
 	} else {
 		data.Port = types.Int64Null()
 	}
-	if value := res.Get(prefix + "authgroup"); value.Exists() && !data.Authgroup.IsNull() {
+	if value := res.Get(prefix+"authgroup"); value.Exists() && !data.Authgroup.IsNull() {
 		data.Authgroup = types.StringValue(value.String())
 	} else {
 		data.Authgroup = types.StringNull()
 	}
-	if value := res.Get(prefix + "state.admin-state"); value.Exists() && !data.AdminState.IsNull() {
+	if value := res.Get(prefix+"state.admin-state"); value.Exists() && !data.AdminState.IsNull() {
 		data.AdminState = types.StringValue(value.String())
 	} else {
 		data.AdminState = types.StringNull()
 	}
-	if value := res.Get(prefix + "device-type.netconf.ned-id"); value.Exists() && !data.NetconfNetId.IsNull() {
+	if value := res.Get(prefix+"device-type.netconf.ned-id"); value.Exists() && !data.NetconfNetId.IsNull() {
 		data.NetconfNetId = types.StringValue(value.String())
 	} else {
 		data.NetconfNetId = types.StringNull()
 	}
-	if value := res.Get(prefix + "device-type.cli.ned-id"); value.Exists() && !data.CliNedId.IsNull() {
+	if value := res.Get(prefix+"device-type.cli.ned-id"); value.Exists() && !data.CliNedId.IsNull() {
 		data.CliNedId = types.StringValue(value.String())
 	} else {
 		data.CliNedId = types.StringNull()
+	}
+	if value := res.Get(prefix+"device-type.generic.ned-id"); value.Exists() && !data.GenericNedId.IsNull() {
+		data.GenericNedId = types.StringValue(value.String())
+	} else {
+		data.GenericNedId = types.StringNull()
 	}
 }
 
@@ -148,23 +157,26 @@ func (data *DeviceData) fromBody(ctx context.Context, res gjson.Result) {
 	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
 		prefix += "0."
 	}
-	if value := res.Get(prefix + "address"); value.Exists() {
+	if value := res.Get(prefix+"address"); value.Exists() {
 		data.Address = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "port"); value.Exists() {
+	if value := res.Get(prefix+"port"); value.Exists() {
 		data.Port = types.Int64Value(value.Int())
 	}
-	if value := res.Get(prefix + "authgroup"); value.Exists() {
+	if value := res.Get(prefix+"authgroup"); value.Exists() {
 		data.Authgroup = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "state.admin-state"); value.Exists() {
+	if value := res.Get(prefix+"state.admin-state"); value.Exists() {
 		data.AdminState = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "device-type.netconf.ned-id"); value.Exists() {
+	if value := res.Get(prefix+"device-type.netconf.ned-id"); value.Exists() {
 		data.NetconfNetId = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "device-type.cli.ned-id"); value.Exists() {
+	if value := res.Get(prefix+"device-type.cli.ned-id"); value.Exists() {
 		data.CliNedId = types.StringValue(value.String())
+	}
+	if value := res.Get(prefix+"device-type.generic.ned-id"); value.Exists() {
+		data.GenericNedId = types.StringValue(value.String())
 	}
 }
 
@@ -197,6 +209,9 @@ func (data *Device) getDeletePaths(ctx context.Context) []string {
 	}
 	if !data.CliNedId.IsNull() {
 		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-type/cli/ned-id", data.getPath()))
+	}
+	if !data.GenericNedId.IsNull() {
+		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-type/generic/ned-id", data.getPath()))
 	}
 	return deletePaths
 }

@@ -23,9 +23,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
-	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -34,7 +31,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/netascode/go-restconf"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 )
 
 func NewDeviceResource() resource.Resource {
@@ -89,10 +89,10 @@ func (r *DeviceResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Optional:            true,
 			},
 			"admin_state": schema.StringAttribute{
-				MarkdownDescription: helpers.NewAttributeDescription("Administrative state.").AddStringEnumDescription("locked", "unlocked", "southbound-locked", "config-locked", "call-home").String,
+				MarkdownDescription: helpers.NewAttributeDescription("Administrative state.").AddStringEnumDescription("locked", "unlocked", "southbound-locked", "config-locked", "call-home", ).String,
 				Optional:            true,
 				Validators: []validator.String{
-					stringvalidator.OneOf("locked", "unlocked", "southbound-locked", "config-locked", "call-home"),
+					stringvalidator.OneOf("locked", "unlocked", "southbound-locked", "config-locked", "call-home", ),
 				},
 			},
 			"netconf_net_id": schema.StringAttribute{
@@ -101,6 +101,10 @@ func (r *DeviceResource) Schema(ctx context.Context, req resource.SchemaRequest,
 			},
 			"cli_ned_id": schema.StringAttribute{
 				MarkdownDescription: helpers.NewAttributeDescription("CLI NED ID.").String,
+				Optional:            true,
+			},
+			"generic_ned_id": schema.StringAttribute{
+				MarkdownDescription: helpers.NewAttributeDescription("Generic NED ID.").String,
 				Optional:            true,
 			},
 		},
@@ -165,7 +169,7 @@ func (r *DeviceResource) Create(ctx context.Context, req resource.CreateRequest,
 			}
 		}
 	}
-
+	
 	plan.Id = types.StringValue(plan.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Create finished successfully", plan.getPath()))

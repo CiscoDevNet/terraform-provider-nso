@@ -56,3 +56,9 @@ attributes:
     type: String
     description: CLI NED ID.
     example: cisco-ios-cli-3.8:cisco-ios-cli-3.8
+  - yang_name: device-type/ne-type/generic/generic/ned-id
+    xpath: device-type/generic/ned-id
+    tf_name: generic_ned_id
+    type: String
+    description: Generic NED ID.
+    example: f5-bigip-nc-1.0:f5-bigip-nc-1.0

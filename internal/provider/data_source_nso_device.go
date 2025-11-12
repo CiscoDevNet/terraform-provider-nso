@@ -91,6 +91,10 @@ func (d *DeviceDataSource) Schema(ctx context.Context, req datasource.SchemaRequ
 				MarkdownDescription: "CLI NED ID.",
 				Computed:            true,
 			},
+			"generic_ned_id": schema.StringAttribute{
+				MarkdownDescription: "Generic NED ID.",
+				Computed:            true,
+			},
 		},
 	}
 }

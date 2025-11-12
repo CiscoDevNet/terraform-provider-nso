@@ -21,30 +21,29 @@ package provider
 
 import (
 	"context"
+	"regexp"
 	"fmt"
 	"net/url"
-	"regexp"
 
-	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/tidwall/gjson"
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/tidwall/sjson"
+	"github.com/tidwall/gjson"
 )
-
 type DeviceGroup struct {
-	Instance     types.String `tfsdk:"instance"`
-	Id           types.String `tfsdk:"id"`
-	Name         types.String `tfsdk:"name"`
-	DeviceNames  types.List   `tfsdk:"device_names"`
-	DeviceGroups types.List   `tfsdk:"device_groups"`
+	Instance types.String `tfsdk:"instance"`
+	Id     types.String `tfsdk:"id"`
+	Name types.String `tfsdk:"name"`
+	DeviceNames types.List `tfsdk:"device_names"`
+	DeviceGroups types.List `tfsdk:"device_groups"`
 }
 
 type DeviceGroupData struct {
-	Instance     types.String `tfsdk:"instance"`
-	Id           types.String `tfsdk:"id"`
-	Name         types.String `tfsdk:"name"`
-	DeviceNames  types.List   `tfsdk:"device_names"`
-	DeviceGroups types.List   `tfsdk:"device_groups"`
+	Instance types.String `tfsdk:"instance"`
+	Id     types.String `tfsdk:"id"`
+	Name types.String `tfsdk:"name"`
+	DeviceNames types.List `tfsdk:"device_names"`
+	DeviceGroups types.List `tfsdk:"device_groups"`
 }
 
 func (data DeviceGroup) getPath() string {
@@ -89,17 +88,17 @@ func (data *DeviceGroup) updateFromBody(ctx context.Context, res gjson.Result) {
 	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
 		prefix += "0."
 	}
-	if value := res.Get(prefix + "name"); value.Exists() && !data.Name.IsNull() {
+	if value := res.Get(prefix+"name"); value.Exists() && !data.Name.IsNull() {
 		data.Name = types.StringValue(value.String())
 	} else {
 		data.Name = types.StringNull()
 	}
-	if value := res.Get(prefix + "device-name"); value.Exists() && !data.DeviceNames.IsNull() {
+	if value := res.Get(prefix+"device-name"); value.Exists() && !data.DeviceNames.IsNull() {
 		data.DeviceNames = helpers.GetStringList(value.Array())
 	} else {
 		data.DeviceNames = types.ListNull(types.StringType)
 	}
-	if value := res.Get(prefix + "device-group"); value.Exists() && !data.DeviceGroups.IsNull() {
+	if value := res.Get(prefix+"device-group"); value.Exists() && !data.DeviceGroups.IsNull() {
 		data.DeviceGroups = helpers.GetStringList(value.Array())
 	} else {
 		data.DeviceGroups = types.ListNull(types.StringType)
@@ -111,12 +110,12 @@ func (data *DeviceGroupData) fromBody(ctx context.Context, res gjson.Result) {
 	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
 		prefix += "0."
 	}
-	if value := res.Get(prefix + "device-name"); value.Exists() {
+	if value := res.Get(prefix+"device-name"); value.Exists() {
 		data.DeviceNames = helpers.GetStringList(value.Array())
 	} else {
 		data.DeviceNames = types.ListNull(types.StringType)
 	}
-	if value := res.Get(prefix + "device-group"); value.Exists() {
+	if value := res.Get(prefix+"device-group"); value.Exists() {
 		data.DeviceGroups = helpers.GetStringList(value.Array())
 	} else {
 		data.DeviceGroups = types.ListNull(types.StringType)
