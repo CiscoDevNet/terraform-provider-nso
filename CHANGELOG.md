@@ -1,3 +1,8 @@
+## 0.2.1 (unreleased)
+
+- Fix issue where nested list paths were not translated correctly in the `nso_restconf` resource
+- Add `generic_ned_id` attribute to `nso_device` resource and data source
+
 ## 0.2.0
 
 - Migrate to `CiscoDevNet` registry namespace
