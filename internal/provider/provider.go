@@ -278,6 +278,10 @@ func (p *NsoProvider) Resources(ctx context.Context) []func() resource.Resource 
 		NewDeviceConfigResource,
 		NewDeviceResource,
 		NewDeviceGroupResource,
+		NewCommitDryRunResource,
+		NewCommitResource,
+		NewRollbackDryRunResource,
+		NewRollbackResource,
 	}
 }
 
