@@ -37,6 +37,7 @@ resource "nso_device" "example" {
   - Choices: `locked`, `unlocked`, `southbound-locked`, `config-locked`, `call-home`
 - `authgroup` (String) The authentication credentials used when connecting to this managed device.
 - `cli_ned_id` (String) CLI NED ID.
+- `generic_ned_id` (String) Generic NED ID.
 - `instance` (String) An instance name from the provider configuration.
 - `netconf_net_id` (String) NETCONF NED ID.
 - `port` (Number) Port for the management interface on the device. If this leaf is not configured, NCS will use a default value based on the type of device. For example, a NETCONF device uses port 830, a CLI device over SSH uses port 22, and an SNMP device uses port 161.

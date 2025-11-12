@@ -61,4 +61,5 @@ attributes:
     tf_name: generic_ned_id
     type: String
     description: Generic NED ID.
+    exclude_test: true
     example: f5-bigip-nc-1.0:f5-bigip-nc-1.0
