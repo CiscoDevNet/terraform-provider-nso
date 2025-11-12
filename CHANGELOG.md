@@ -1,4 +1,4 @@
-## 0.2.1 (unreleased)
+## 0.2.1
 
 - Fix issue where nested list paths were not translated correctly in the `nso_restconf` resource
 - Add `generic_ned_id` attribute to `nso_device` resource and data source
