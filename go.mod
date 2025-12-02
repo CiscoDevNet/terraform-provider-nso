@@ -4,10 +4,10 @@ go 1.24.0
 
 require (
 	github.com/hashicorp/terraform-plugin-docs v0.22.0
-	github.com/hashicorp/terraform-plugin-framework v1.16.1
+	github.com/hashicorp/terraform-plugin-framework v1.17.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
 	github.com/hashicorp/terraform-plugin-go v0.29.0
-	github.com/hashicorp/terraform-plugin-log v0.9.0
+	github.com/hashicorp/terraform-plugin-log v0.10.0
 	github.com/hashicorp/terraform-plugin-testing v1.13.3
 	github.com/netascode/go-restconf v0.1.18
 	github.com/openconfig/goyang v1.6.3
