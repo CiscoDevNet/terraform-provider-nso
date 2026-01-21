@@ -1,0 +1,11 @@
+# rollback_config.yaml
+# NSO Rollback Configuration Parameters for Testing
+
+rollback:
+  # Rollback ID - specify which rollback point to use as fallback
+  # Use the most recent rollback ID that was captured in previous runs
+  id: 10306
+  
+  # Metadata for documentation
+  description: "Fallback rollback configuration for rollback ID capture testing"
+  test_name: "rollback_id_capture_test"
