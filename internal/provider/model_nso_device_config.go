@@ -19,14 +19,13 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"strings"
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/netascode/go-restconf"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 type DeviceConfig struct {
@@ -78,36 +77,43 @@ func (data DeviceConfig) toBody(ctx context.Context) string {
 	if root == "tailf-ncs:config" {
 		root = "config"
 	}
-	body := `{"` + root + `":{}}`
 
 	var attributes map[string]string
 	data.Attributes.ElementsAs(ctx, &attributes, false)
 
+	rootMap := map[string]interface{}{root: make(map[string]interface{})}
+	current := rootMap[root].(map[string]interface{})
+
 	for attr, value := range attributes {
 		attr = strings.ReplaceAll(attr, "/", ".")
-		body, _ = sjson.Set(body, root+"."+attr, value)
+		current[attr] = value
 	}
+
+	currentMap := rootMap[root].(map[string]interface{})
+
 	for i := range data.Lists {
 		listName := strings.ReplaceAll(data.Lists[i].Name.ValueString(), "/", ".")
 		if len(data.Lists[i].Items) > 0 {
-			body, _ = sjson.Set(body, root+"."+listName, []interface{}{})
+			listItems := make([]interface{}, 0)
 			for ii := range data.Lists[i].Items {
 				var listAttributes map[string]string
 				data.Lists[i].Items[ii].ElementsAs(ctx, &listAttributes, false)
-				attrs := restconf.Body{}
+				itemMap := make(map[string]interface{})
 				for attr, value := range listAttributes {
-					attrs = attrs.Set(attr, value)
+					itemMap[attr] = value
 				}
-				body, _ = sjson.SetRaw(body, root+"."+listName+".-1", attrs.Str)
+				listItems = append(listItems, itemMap)
 			}
+			currentMap[listName] = listItems
 		} else if len(data.Lists[i].Values.Elements()) > 0 {
 			var values []string
 			data.Lists[i].Values.ElementsAs(ctx, &values, false)
-			body, _ = sjson.Set(body, root+"."+listName, values)
+			currentMap[listName] = values
 		}
 	}
 
-	return body
+	jsonBytes, _ := json.Marshal(rootMap)
+	return string(jsonBytes)
 }
 
 func (data *DeviceConfig) fromBody(ctx context.Context, res gjson.Result) {
