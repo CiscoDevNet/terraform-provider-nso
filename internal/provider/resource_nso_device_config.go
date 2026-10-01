@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -29,6 +30,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/netascode/go-netconf"
 	"github.com/netascode/go-restconf"
 )
 
@@ -41,7 +43,7 @@ func NewDeviceConfigResource() resource.Resource {
 }
 
 type DeviceConfigResource struct {
-	clients map[string]*restconf.Client
+	data *NsoProviderData
 }
 
 func (r *DeviceConfigResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -126,34 +128,48 @@ func (r *DeviceConfigResource) Configure(_ context.Context, req resource.Configu
 		return
 	}
 
-	r.clients = req.ProviderData.(map[string]*restconf.Client)
+	r.data = req.ProviderData.(*NsoProviderData)
 }
 
 func (r *DeviceConfigResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan DeviceConfig
 
-	// Read plan
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+	instance, ok := r.data.Instances[plan.Instance.ValueString()]
+	if !ok {
 		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
 		return
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Create", plan.getPath()))
 
-	body := plan.toBody(ctx)
-	res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
-	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
-		return
+	if r.data.Transport == "netconf" {
+		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
+		if locked {
+			defer instance.NetconfOpMutex.Unlock()
+		}
+		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
+
+		body := plan.toBodyXML(ctx)
+		if err := helpers.EditConfig(ctx, instance.NetconfClient, body, instance.AutoCommit); err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
+			return
+		}
+	} else {
+		body := plan.toBody(ctx)
+		res, err := instance.RestconfClient.PatchData(plan.getPathShort(), body)
+		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
+			_, err = instance.RestconfClient.PutData(plan.getPath(), body)
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+			return
+		}
 	}
 
 	plan.Id = types.StringValue(plan.getPath())
@@ -171,31 +187,51 @@ func (r *DeviceConfigResource) Create(ctx context.Context, req resource.CreateRe
 func (r *DeviceConfigResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state DeviceConfig
 
-	// Read state
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+	instance, ok := r.data.Instances[state.Instance.ValueString()]
+	if !ok {
 		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
 		return
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.getPath()))
 
-	res, err := r.clients[state.Instance.ValueString()].GetData(state.getPath(), restconf.Query("content", "config"))
-	if res.StatusCode == 404 {
-		state.Attributes = types.MapNull(types.StringType)
-		state.Lists = make([]DeviceConfigList, 0)
-	} else {
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read object, got error: %s", err))
-			return
+	if r.data.Transport == "netconf" {
+		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
+		if locked {
+			defer instance.NetconfOpMutex.Unlock()
 		}
+		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-		state.fromBody(ctx, res.Res)
+		filter := helpers.GetXpathFilter(state.getXPath())
+		res, err := instance.NetconfClient.GetConfig(ctx, "running", filter)
+		if helpers.IsGetConfigResponseEmpty(&res) {
+			state.Attributes = types.MapNull(types.StringType)
+			state.Lists = make([]DeviceConfigList, 0)
+		} else {
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
+				return
+			}
+			state.fromBodyXML(ctx, res.Res)
+		}
+	} else {
+		res, err := instance.RestconfClient.GetData(state.getPath(), restconf.Query("content", "config"))
+		if res.StatusCode == 404 {
+			state.Attributes = types.MapNull(types.StringType)
+			state.Lists = make([]DeviceConfigList, 0)
+		} else {
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read object, got error: %s", err))
+				return
+			}
+			state.fromBody(ctx, res.Res)
+		}
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", state.getPath()))
@@ -207,45 +243,68 @@ func (r *DeviceConfigResource) Read(ctx context.Context, req resource.ReadReques
 func (r *DeviceConfigResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state DeviceConfig
 
-	// Read plan
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Read state
 	diags = req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if _, ok := r.clients[plan.Instance.ValueString()]; !ok {
+	instance, ok := r.data.Instances[plan.Instance.ValueString()]
+	if !ok {
 		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", plan.Instance.ValueString()))
 		return
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.getPath()))
 
-	body := plan.toBody(ctx)
-	res, err := r.clients[plan.Instance.ValueString()].PatchData(plan.getPathShort(), body)
-	if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-		_, err = r.clients[plan.Instance.ValueString()].PutData(plan.getPath(), body)
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
-		return
-	}
+	if r.data.Transport == "netconf" {
+		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
+		if locked {
+			defer instance.NetconfOpMutex.Unlock()
+		}
+		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-	deletedListItems := plan.getDeletedListItems(ctx, state)
-	tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
-
-	for _, i := range deletedListItems {
-		res, err := r.clients[state.Instance.ValueString()].DeleteData(i)
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+		body := plan.toBodyXML(ctx)
+		if err := helpers.EditConfig(ctx, instance.NetconfClient, body, instance.AutoCommit); err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
 			return
+		}
+
+		deletedListItems := plan.getDeletedListItems(ctx, state)
+		tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
+		for _, item := range deletedListItems {
+			deleteBody := netconf.Body{}
+			deleteBody = helpers.RemoveFromXPath(deleteBody, helpers.ConvertRestconfPathToXPath(item))
+			if err := helpers.EditConfig(ctx, instance.NetconfClient, deleteBody.Res(), instance.AutoCommit); err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete list item (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
+				return
+			}
+		}
+	} else {
+		body := plan.toBody(ctx)
+		res, err := instance.RestconfClient.PatchData(plan.getPathShort(), body)
+		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
+			_, err = instance.RestconfClient.PutData(plan.getPath(), body)
+		}
+		if err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
+			return
+		}
+
+		deletedListItems := plan.getDeletedListItems(ctx, state)
+		tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
+		for _, i := range deletedListItems {
+			res, err := instance.RestconfClient.DeleteData(i)
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
 		}
 	}
 
@@ -258,14 +317,14 @@ func (r *DeviceConfigResource) Update(ctx context.Context, req resource.UpdateRe
 func (r *DeviceConfigResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state DeviceConfig
 
-	// Read state
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if _, ok := r.clients[state.Instance.ValueString()]; !ok {
+	instance, ok := r.data.Instances[state.Instance.ValueString()]
+	if !ok {
 		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", state.Instance.ValueString()))
 		return
 	}
@@ -273,10 +332,25 @@ func (r *DeviceConfigResource) Delete(ctx context.Context, req resource.DeleteRe
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.getPath()))
 
 	if state.Delete.ValueBool() {
-		res, err := r.clients[state.Instance.ValueString()].DeleteData(state.getPath())
-		if err != nil && res.StatusCode != 404 {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
-			return
+		if r.data.Transport == "netconf" {
+			locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
+			if locked {
+				defer instance.NetconfOpMutex.Unlock()
+			}
+			defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
+
+			body := netconf.Body{}
+			body = helpers.RemoveFromXPath(body, state.getXPath())
+			if err := helpers.EditConfig(ctx, instance.NetconfClient, body.Res(), instance.AutoCommit); err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
+				return
+			}
+		} else {
+			res, err := instance.RestconfClient.DeleteData(state.getPath())
+			if err != nil && res.StatusCode != 404 {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+				return
+			}
 		}
 	}
 

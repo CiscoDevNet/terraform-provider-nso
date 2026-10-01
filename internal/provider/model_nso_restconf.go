@@ -24,7 +24,9 @@ import (
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/netascode/go-netconf"
 	"github.com/netascode/go-restconf"
+	"github.com/netascode/xmldot"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -174,6 +176,118 @@ func (data *Restconf) fromBody(ctx context.Context, res gjson.Result) {
 			values := res.Get(prefix + namePath)
 			if values.IsArray() {
 				data.Lists[i].Values = types.ListValueMust(data.Lists[i].Values.ElementType(ctx), helpers.GetValueSlice(values.Array()))
+			}
+		}
+	}
+}
+
+func (data Restconf) getXPath() string {
+	return "/" + helpers.ConvertRestconfPathToXPath(data.Path.ValueString())
+}
+
+func (data Restconf) toBodyXML(ctx context.Context) string {
+	body := netconf.Body{}
+	xpath := data.getXPath()
+
+	var attributes map[string]string
+	data.Attributes.ElementsAs(ctx, &attributes, false)
+
+	if len(attributes) == 0 && len(data.Lists) == 0 {
+		body = helpers.SetFromXPath(body, xpath, nil)
+		return body.Res()
+	}
+
+	for attr, value := range attributes {
+		attrXPath := xpath + "/" + strings.ReplaceAll(attr, "/", "/")
+		body = helpers.SetFromXPath(body, attrXPath, value)
+	}
+
+	for i := range data.Lists {
+		listName := data.Lists[i].Name.ValueString()
+		listXPath := xpath + "/" + listName
+
+		if len(data.Lists[i].Items) > 0 {
+			keys := strings.Split(data.Lists[i].Key.ValueString(), ",")
+			for ii := range data.Lists[i].Items {
+				var listAttributes map[string]string
+				data.Lists[i].Items[ii].ElementsAs(ctx, &listAttributes, false)
+
+				var keyPreds string
+				for _, key := range keys {
+					if val, ok := listAttributes[key]; ok {
+						keyPreds += "[" + key + "='" + val + "']"
+					}
+				}
+				itemXPath := listXPath + keyPreds
+
+				for attr, value := range listAttributes {
+					body = helpers.SetFromXPath(body, itemXPath+"/"+attr, value)
+				}
+			}
+		} else if len(data.Lists[i].Values.Elements()) > 0 {
+			var values []string
+			data.Lists[i].Values.ElementsAs(ctx, &values, false)
+			for _, value := range values {
+				body = helpers.AppendFromXPath(body, listXPath, value)
+			}
+		}
+	}
+
+	return body.Res()
+}
+
+func (data *Restconf) fromBodyXML(ctx context.Context, res xmldot.Result) {
+	xpath := "data" + data.getXPath()
+
+	attributes := data.Attributes.Elements()
+	for attr := range attributes {
+		attrXPath := xpath + "/" + strings.ReplaceAll(attr, "/", "/")
+		value := helpers.GetFromXPath(res, attrXPath)
+		if !value.Exists() {
+			attributes[attr] = types.StringValue("")
+		} else {
+			attributes[attr] = types.StringValue(value.String())
+		}
+	}
+	data.Attributes = types.MapValueMust(types.StringType, attributes)
+
+	for i := range data.Lists {
+		keys := strings.Split(data.Lists[i].Key.ValueString(), ",")
+		listName := data.Lists[i].Name.ValueString()
+
+		if len(data.Lists[i].Items) > 0 {
+			for ii := range data.Lists[i].Items {
+				var keyValues []string
+				for _, key := range keys {
+					v, _ := data.Lists[i].Items[ii].Elements()[key].ToTerraformValue(ctx)
+					var keyValue string
+					v.As(&keyValue)
+					keyValues = append(keyValues, keyValue)
+				}
+
+				var keyPreds string
+				for ki, key := range keys {
+					keyPreds += "[" + key + "='" + keyValues[ki] + "']"
+				}
+				itemXPath := xpath + "/" + listName + keyPreds
+
+				attributes := data.Lists[i].Items[ii].Elements()
+				for attr := range attributes {
+					attrXPath := itemXPath + "/" + attr
+					value := helpers.GetFromXPath(res, attrXPath)
+					if !value.Exists() {
+						attributes[attr] = types.StringValue("")
+					} else {
+						attributes[attr] = types.StringValue(value.String())
+					}
+				}
+				data.Lists[i].Items[ii] = types.MapValueMust(types.StringType, attributes)
+			}
+		} else if len(data.Lists[i].Values.Elements()) > 0 {
+			listXPath := xpath + "/" + listName
+			value := helpers.GetFromXPath(res, listXPath)
+			if value.Exists() {
+				data.Lists[i].Values = types.ListValueMust(data.Lists[i].Values.ElementType(ctx), helpers.GetXmlValueSlice(value.Array()))
 			}
 		}
 	}

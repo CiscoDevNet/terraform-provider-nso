@@ -22,6 +22,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/netascode/xmldot"
 	"github.com/tidwall/gjson"
 )
 
@@ -53,6 +54,14 @@ func LastElement(path string) string {
 }
 
 func GetValueSlice(result []gjson.Result) []attr.Value {
+	v := make([]attr.Value, len(result))
+	for r := range result {
+		v[r] = types.StringValue(result[r].String())
+	}
+	return v
+}
+
+func GetXmlValueSlice(result []xmldot.Result) []attr.Value {
 	v := make([]attr.Value, len(result))
 	for r := range result {
 		v[r] = types.StringValue(result[r].String())

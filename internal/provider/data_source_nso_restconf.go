@@ -28,7 +28,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/netascode/go-restconf"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -42,7 +41,7 @@ func NewRestconfDataSource() datasource.DataSource {
 }
 
 type RestconfDataSource struct {
-	clients map[string]*restconf.Client
+	data *NsoProviderData
 }
 
 func (d *RestconfDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -81,51 +80,84 @@ func (d *RestconfDataSource) Configure(_ context.Context, req datasource.Configu
 		return
 	}
 
-	d.clients = req.ProviderData.(map[string]*restconf.Client)
+	d.data = req.ProviderData.(*NsoProviderData)
 }
 
 func (d *RestconfDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var config, state RestconfDataSourceModel
 
-	// Read config
 	diags := req.Config.Get(ctx, &config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if _, ok := d.clients[config.Instance.ValueString()]; !ok {
+	instance, ok := d.data.Instances[config.Instance.ValueString()]
+	if !ok {
 		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", config.Instance.ValueString()))
 		return
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", config.Id.ValueString()))
 
-	res, err := d.clients[config.Instance.ValueString()].GetData(config.Path.ValueString())
-	if res.StatusCode == 404 {
-		state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
-	} else {
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
-			return
+	if d.data.Transport == "netconf" {
+		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
+		if locked {
+			defer instance.NetconfOpMutex.Unlock()
 		}
+		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-		state.Path = config.Path
-		state.Id = config.Path
-
-		attributes := make(map[string]attr.Value)
-
-		for attr, value := range res.Res.Get(helpers.LastElement(config.Path.ValueString())).Map() {
-			// handle empty maps
-			if value.IsObject() && len(value.Map()) == 0 {
-				attributes[attr] = types.StringValue("")
-			} else if value.Raw == "[null]" {
-				attributes[attr] = types.StringValue("")
-			} else {
-				attributes[attr] = types.StringValue(value.String())
+		xpath := helpers.ConvertRestconfPathToXPath(config.Path.ValueString())
+		filter := helpers.GetXpathFilter(xpath)
+		res, err := instance.NetconfClient.GetConfig(ctx, "running", filter)
+		if helpers.IsGetConfigResponseEmpty(&res) {
+			state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		} else {
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
+				return
 			}
+
+			state.Path = config.Path
+			state.Id = config.Path
+
+			attributes := make(map[string]attr.Value)
+			dataPrefix := "data" + xpath
+			for key, val := range res.Res.Get(dataPrefix).Map() {
+				if !val.Exists() || val.String() == "" {
+					attributes[key] = types.StringValue("")
+				} else {
+					attributes[key] = types.StringValue(val.String())
+				}
+			}
+			state.Attributes = types.MapValueMust(types.StringType, attributes)
 		}
-		state.Attributes = types.MapValueMust(types.StringType, attributes)
+	} else {
+		res, err := instance.RestconfClient.GetData(config.Path.ValueString())
+		if res.StatusCode == 404 {
+			state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		} else {
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
+				return
+			}
+
+			state.Path = config.Path
+			state.Id = config.Path
+
+			attributes := make(map[string]attr.Value)
+
+			for attr, value := range res.Res.Get(helpers.LastElement(config.Path.ValueString())).Map() {
+				if value.IsObject() && len(value.Map()) == 0 {
+					attributes[attr] = types.StringValue("")
+				} else if value.Raw == "[null]" {
+					attributes[attr] = types.StringValue("")
+				} else {
+					attributes[attr] = types.StringValue(value.String())
+				}
+			}
+			state.Attributes = types.MapValueMust(types.StringType, attributes)
+		}
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", config.Id.ValueString()))

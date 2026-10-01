@@ -29,11 +29,18 @@ provider "nso" {
 
 ### Optional
 
-- `insecure` (Boolean) Allow insecure HTTPS client. This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.
+- `attempt_timeout` (Number) Timeout in seconds for a single NETCONF operation attempt. Only used with NETCONF transport. This can also be set as the NSO_ATTEMPT_TIMEOUT environment variable. Defaults to `30`.
+- `auto_commit` (Boolean) Automatically commit the candidate datastore after each NETCONF edit-config. Only used with NETCONF transport. This can also be set as the NSO_AUTO_COMMIT environment variable. Defaults to `true`.
+- `host` (String) Hostname or IP address of the Cisco NSO instance (NETCONF transport). Optionally a port can be added with `:2022`. The default port is `2022`. This can also be set as the NSO_HOST environment variable.
+- `insecure` (Boolean) Allow insecure HTTPS client (RESTCONF) or skip SSH host key verification (NETCONF). This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.
 - `instances` (Attributes List) This can be used to manage a list of instances from a single provider. All instances must use the same credentials. Each resource and data source has an optional attribute named `instance`, which can then select an instance by its name from this list. (see [below for nested schema](#nestedatt--instances))
+- `lock_release_timeout` (Number) Timeout in seconds to wait for NETCONF datastore lock release. Only used with NETCONF transport. This can also be set as the NSO_LOCK_RELEASE_TIMEOUT environment variable. Defaults to `120`.
 - `password` (String, Sensitive) Password for the NSO instance. This can also be set as the NSO_PASSWORD environment variable.
-- `retries` (Number) Number of retries for RESTCONF API calls. This can also be set as the NSO_RETRIES environment variable. Defaults to `1`.
-- `url` (String) URL of the Cisco NSO instance. Optionally a port can be added with `:12345`. The default port is `443`. This can also be set as the NSO_URL environment variable.
+- `retries` (Number) Number of retries for API calls. This can also be set as the NSO_RETRIES environment variable. Defaults to `1` (RESTCONF) or `3` (NETCONF).
+- `reuse_connection` (Boolean) Keep NETCONF sessions open for reuse across operations. Only used with NETCONF transport. This can also be set as the NSO_REUSE_CONNECTION environment variable. Defaults to `true`.
+- `total_timeout` (Number) Total timeout in seconds across all NETCONF retries. Only used with NETCONF transport. This can also be set as the NSO_TOTAL_TIMEOUT environment variable. Defaults to `120`.
+- `transport` (String) Transport protocol to use for communicating with NSO. Valid values are `restconf` and `netconf`. This can also be set as the NSO_TRANSPORT environment variable. Defaults to `restconf`.
+- `url` (String) URL of the Cisco NSO instance (RESTCONF transport). Optionally a port can be added with `:12345`. The default port is `443`. This can also be set as the NSO_URL environment variable.
 - `username` (String) Username for the NSO instance. This can also be set as the NSO_USERNAME environment variable.
 
 <a id="nestedatt--instances"></a>
@@ -42,4 +49,8 @@ provider "nso" {
 Required:
 
 - `name` (String) Instance name.
-- `url` (String) URL of the Cisco NSO instance.
+
+Optional:
+
+- `host` (String) Hostname or IP address of the Cisco NSO instance (NETCONF transport).
+- `url` (String) URL of the Cisco NSO instance (RESTCONF transport).

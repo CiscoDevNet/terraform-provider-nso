@@ -42,7 +42,7 @@ func NewDeviceConfigDataSource() datasource.DataSource {
 }
 
 type DeviceConfigDataSource struct {
-	clients map[string]*restconf.Client
+	data *NsoProviderData
 }
 
 func (d *DeviceConfigDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -85,59 +85,92 @@ func (d *DeviceConfigDataSource) Configure(_ context.Context, req datasource.Con
 		return
 	}
 
-	d.clients = req.ProviderData.(map[string]*restconf.Client)
+	d.data = req.ProviderData.(*NsoProviderData)
 }
 
 func (d *DeviceConfigDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var config, state DeviceConfigData
 
-	// Read config
 	diags := req.Config.Get(ctx, &config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if _, ok := d.clients[config.Instance.ValueString()]; !ok {
+	instance, ok := d.data.Instances[config.Instance.ValueString()]
+	if !ok {
 		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", config.Instance.ValueString()))
 		return
 	}
 
-	path := "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config"
+	restconfPath := "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config"
 	if config.Path.ValueString() != "" {
-		path = "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config/" + config.Path.ValueString()
+		restconfPath = "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config/" + config.Path.ValueString()
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", path))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", restconfPath))
 
-	res, err := d.clients[config.Instance.ValueString()].GetData(path, restconf.Query("content", "config"))
-	if res.StatusCode == 404 {
-		state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
-	} else {
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
-			return
+	if d.data.Transport == "netconf" {
+		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
+		if locked {
+			defer instance.NetconfOpMutex.Unlock()
 		}
+		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-		state.Path = types.StringValue(path)
-		state.Id = types.StringValue(path)
-
-		attributes := make(map[string]attr.Value)
-
-		for attr, value := range res.Res.Get(helpers.LastElement(path)).Map() {
-			// handle empty maps
-			if value.IsObject() && len(value.Map()) == 0 {
-				attributes[attr] = types.StringValue("")
-			} else if value.Raw == "[null]" {
-				attributes[attr] = types.StringValue("")
-			} else {
-				attributes[attr] = types.StringValue(value.String())
+		xpath := helpers.ConvertRestconfPathToXPath(restconfPath)
+		filter := helpers.GetXpathFilter(xpath)
+		res, err := instance.NetconfClient.GetConfig(ctx, "running", filter)
+		if helpers.IsGetConfigResponseEmpty(&res) {
+			state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		} else {
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
+				return
 			}
+
+			state.Path = types.StringValue(restconfPath)
+			state.Id = types.StringValue(restconfPath)
+
+			attributes := make(map[string]attr.Value)
+			dataPrefix := "data" + xpath
+			for key, val := range res.Res.Get(dataPrefix).Map() {
+				if !val.Exists() || val.String() == "" {
+					attributes[key] = types.StringValue("")
+				} else {
+					attributes[key] = types.StringValue(val.String())
+				}
+			}
+			state.Attributes = types.MapValueMust(types.StringType, attributes)
 		}
-		state.Attributes = types.MapValueMust(types.StringType, attributes)
+	} else {
+		res, err := instance.RestconfClient.GetData(restconfPath, restconf.Query("content", "config"))
+		if res.StatusCode == 404 {
+			state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
+		} else {
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
+				return
+			}
+
+			state.Path = types.StringValue(restconfPath)
+			state.Id = types.StringValue(restconfPath)
+
+			attributes := make(map[string]attr.Value)
+
+			for attr, value := range res.Res.Get(helpers.LastElement(restconfPath)).Map() {
+				if value.IsObject() && len(value.Map()) == 0 {
+					attributes[attr] = types.StringValue("")
+				} else if value.Raw == "[null]" {
+					attributes[attr] = types.StringValue("")
+				} else {
+					attributes[attr] = types.StringValue(value.String())
+				}
+			}
+			state.Attributes = types.MapValueMust(types.StringType, attributes)
+		}
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", path))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", restconfPath))
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
