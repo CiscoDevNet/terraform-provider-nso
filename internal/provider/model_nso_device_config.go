@@ -20,6 +20,7 @@ package provider
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
@@ -83,9 +84,41 @@ func (data DeviceConfig) toBody(ctx context.Context) string {
 	var attributes map[string]string
 	data.Attributes.ElementsAs(ctx, &attributes, false)
 
-	for attr, value := range attributes {
-		attr = strings.ReplaceAll(attr, "/", ".")
-		body, _ = sjson.Set(body, root+"."+attr, value)
+	// Ensure deterministic attribute ordering in the JSON body.
+	// YANG list entries require the key leaf to appear first in the
+	// RESTCONF JSON object. Extract the key value from the path
+	// (segment after '=') and emit the matching attribute first.
+	attrKeys := make([]string, 0, len(attributes))
+	for attr := range attributes {
+		attrKeys = append(attrKeys, attr)
+	}
+	slices.Sort(attrKeys)
+
+	// Find the key value from the RESTCONF path (e.g., "Loopback=0" -> "0")
+	var keyAttr string
+	path := data.Path.ValueString()
+	if eqIdx := strings.LastIndex(path, "="); eqIdx >= 0 {
+		keyValue := path[eqIdx+1:]
+		for _, attr := range attrKeys {
+			if attributes[attr] == keyValue {
+				keyAttr = attr
+				break
+			}
+		}
+	}
+
+	// Emit key attribute first, then the rest
+	if keyAttr != "" {
+		attrPath := strings.ReplaceAll(keyAttr, "/", ".")
+		body, _ = sjson.Set(body, root+"."+attrPath, attributes[keyAttr])
+	}
+	for _, attr := range attrKeys {
+		if attr == keyAttr {
+			continue
+		}
+		value := attributes[attr]
+		attrPath := strings.ReplaceAll(attr, "/", ".")
+		body, _ = sjson.Set(body, root+"."+attrPath, value)
 	}
 	for i := range data.Lists {
 		listName := strings.ReplaceAll(data.Lists[i].Name.ValueString(), "/", ".")
@@ -94,9 +127,14 @@ func (data DeviceConfig) toBody(ctx context.Context) string {
 			for ii := range data.Lists[i].Items {
 				var listAttributes map[string]string
 				data.Lists[i].Items[ii].ElementsAs(ctx, &listAttributes, false)
+				listAttrKeys := make([]string, 0, len(listAttributes))
+				for attr := range listAttributes {
+					listAttrKeys = append(listAttrKeys, attr)
+				}
+				slices.Sort(listAttrKeys)
 				attrs := restconf.Body{}
-				for attr, value := range listAttributes {
-					attrs = attrs.Set(attr, value)
+				for _, attr := range listAttrKeys {
+					attrs = attrs.Set(attr, listAttributes[attr])
 				}
 				body, _ = sjson.SetRaw(body, root+"."+listName+".-1", attrs.Str)
 			}
