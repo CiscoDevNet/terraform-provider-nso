@@ -1,6 +1,4 @@
-
 ---
-layout: ""
 page_title: "Provider: NSO"
 description: |-
   The NSO provider provides resources to interact with one or more Cisco NSO (Network Sevices Orchestrator) instances.
