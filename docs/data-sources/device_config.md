@@ -3,12 +3,12 @@
 page_title: "nso_device_config Data Source - terraform-provider-nso"
 subcategory: "Device"
 description: |-
-  Retrieves a config part of an NSO device.
+  This data source can read a config part of an NSO device via NETCONF.
 ---
 
 # nso_device_config (Data Source)
 
-Retrieves a config part of an NSO device.
+This data source can read a config part of an NSO device via NETCONF.
 
 ## Example Usage
 
@@ -28,9 +28,9 @@ data "nso_device_config" "example" {
 ### Optional
 
 - `instance` (String) An instance name from the provider configuration.
-- `path` (String) A RESTCONF/YANG config path, e.g. `tailf-ned-cisco-ios:access-list/access-list=1`.
+- `path` (String) An XPath relative to the device config container (`/tailf-ncs:devices/device[name='<device>']/config`), e.g. `tailf-ned-cisco-ios:interface/Loopback[name='0']`.
 
 ### Read-Only
 
-- `attributes` (Map of String) Map of key-value pairs which represents the YANG leafs and its values.
-- `id` (String) The RESTCONF path of the retrieved configuration.
+- `attributes` (Map of String) Map of key-value pairs which represents the YANG leafs directly below the object and their values.
+- `id` (String) The XPath of the retrieved object.

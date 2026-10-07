@@ -19,7 +19,7 @@ resource "nso_device" "example" {
   port        = 22
   authgroup   = "default"
   admin_state = "locked"
-  cli_ned_id  = "cisco-ios-cli-3.8:cisco-ios-cli-3.8"
+  cli_ned_id  = "cisco-ios-cli-6.115:cisco-ios-cli-6.115"
 }
 ```
 
@@ -45,7 +45,7 @@ resource "nso_device" "example" {
 
 ### Read-Only
 
-- `id` (String) The RESTCONF path.
+- `id` (String) The XPath of the object.
 
 ## Import
 
@@ -54,5 +54,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import nso_device.example "tailf-ncs:devices/device=test-device01"
+terraform import nso_device.example "test-device01"
 ```

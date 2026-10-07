@@ -1,5 +1,5 @@
 provider "nso" {
   username = "admin"
   password = "admin"
-  url      = "http://localhost:8080"
+  host     = "nso.example.com:2022"
 }
