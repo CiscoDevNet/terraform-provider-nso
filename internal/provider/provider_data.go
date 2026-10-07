@@ -18,21 +18,40 @@
 package provider
 
 import (
+	"fmt"
 	"sync"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/netascode/go-netconf"
-	"github.com/netascode/go-restconf"
 )
 
 type NsoProviderData struct {
-	Transport string
 	Instances map[string]*NsoInstanceData
 }
 
 type NsoInstanceData struct {
-	RestconfClient  *restconf.Client
 	NetconfClient   *netconf.Client
 	AutoCommit      bool
 	ReuseConnection bool
 	NetconfOpMutex  sync.Mutex
+
+	namespacesMutex sync.Mutex
+	namespacesReady bool
+}
+
+// Prepare opens the NETCONF session and, on first use, registers the XML
+// namespaces of the NED modules advertised in the server capabilities.
+// Request bodies reference NED modules by prefix (e.g. tailf-ned-cisco-ios),
+// so this must run before building any edit-config body.
+func (i *NsoInstanceData) Prepare() error {
+	if err := i.NetconfClient.Open(); err != nil {
+		return fmt.Errorf("failed to open NETCONF connection: %w", err)
+	}
+	i.namespacesMutex.Lock()
+	defer i.namespacesMutex.Unlock()
+	if !i.namespacesReady {
+		helpers.BuildNamespaceMap(i.NetconfClient.ServerCapabilities())
+		i.namespacesReady = true
+	}
+	return nil
 }

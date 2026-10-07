@@ -20,6 +20,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -31,12 +32,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/netascode/go-netconf"
-	"github.com/netascode/go-restconf"
 )
 
-// Ensure provider defined types fully satisfy framework interfaces
 var _ resource.Resource = &DeviceConfigResource{}
 var _ resource.ResourceWithImportState = &DeviceConfigResource{}
+var _ resource.ResourceWithValidateConfig = &DeviceConfigResource{}
 
 func NewDeviceConfigResource() resource.Resource {
 	return &DeviceConfigResource{}
@@ -53,7 +53,7 @@ func (r *DeviceConfigResource) Metadata(ctx context.Context, req resource.Metada
 func (r *DeviceConfigResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "Manages a config part of an NSO device.",
+		MarkdownDescription: "Manages a config part of an NSO device via NETCONF. It is able to read the state and therefore reconcile configuration drift.",
 
 		Attributes: map[string]schema.Attribute{
 			"instance": schema.StringAttribute{
@@ -61,7 +61,7 @@ func (r *DeviceConfigResource) Schema(ctx context.Context, req resource.SchemaRe
 				Optional:            true,
 			},
 			"id": schema.StringAttribute{
-				MarkdownDescription: "The RESTCONF path.",
+				MarkdownDescription: "The XPath of the object.",
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -71,24 +71,24 @@ func (r *DeviceConfigResource) Schema(ctx context.Context, req resource.SchemaRe
 				MarkdownDescription: "An NSO device name.",
 				Required:            true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"path": schema.StringAttribute{
-				MarkdownDescription: "A RESTCONF path.",
+				MarkdownDescription: "An XPath relative to the device config container (`/tailf-ncs:devices/device[name='<device>']/config`), e.g. `tailf-ned-cisco-ios:interface/Loopback[name='0']`. If omitted, the device config container itself is managed.",
 				Optional:            true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"delete": schema.BoolAttribute{
-				MarkdownDescription: "Delete object during destroy operation. Default value is `true`.",
+				MarkdownDescription: "Delete object during destroy operation. Ignored when `path` is not set, as the device config container itself is never deleted. Default value is `true`.",
 				Optional:            true,
 				Computed:            true,
 				Default:             booldefault.StaticBool(true),
 			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "Map of key-value pairs which represents the YANG leafs and its values.",
+				MarkdownDescription: "Map of key-value pairs which represents the YANG leafs and its values. Keys are XPaths relative to `path`.",
 				Optional:            true,
 				Computed:            true,
 				ElementType:         types.StringType,
@@ -99,11 +99,11 @@ func (r *DeviceConfigResource) Schema(ctx context.Context, req resource.SchemaRe
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"name": schema.StringAttribute{
-							MarkdownDescription: "YANG list name.",
+							MarkdownDescription: "YANG list name, relative to `path`.",
 							Required:            true,
 						},
 						"key": schema.StringAttribute{
-							MarkdownDescription: "YANG list key attribute. In case of multiple keys, those should be separated by a comma (`,`).",
+							MarkdownDescription: "YANG list key attribute. In case of multiple keys, those should be separated by a comma (`,`). Required when `items` is used.",
 							Optional:            true,
 						},
 						"items": schema.ListAttribute{
@@ -123,6 +123,14 @@ func (r *DeviceConfigResource) Schema(ctx context.Context, req resource.SchemaRe
 	}
 }
 
+func (r *DeviceConfigResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data DeviceConfig
+	if diags := req.Config.Get(ctx, &data); diags.HasError() {
+		return
+	}
+	resp.Diagnostics.Append(validateYangLists(ctx, data.Lists)...)
+}
+
 func (r *DeviceConfigResource) Configure(_ context.Context, req resource.ConfigureRequest, _ *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
@@ -134,6 +142,7 @@ func (r *DeviceConfigResource) Configure(_ context.Context, req resource.Configu
 func (r *DeviceConfigResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan DeviceConfig
 
+	// Read plan
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -146,39 +155,31 @@ func (r *DeviceConfigResource) Create(ctx context.Context, req resource.CreateRe
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Create", plan.getPath()))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Create", plan.getXPath()))
 
-	if r.data.Transport == "netconf" {
-		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
-		if locked {
-			defer instance.NetconfOpMutex.Unlock()
-		}
-		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
+	locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
+	if locked {
+		defer instance.NetconfOpMutex.Unlock()
+	}
+	defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-		body := plan.toBodyXML(ctx)
-		if err := helpers.EditConfig(ctx, instance.NetconfClient, body, instance.AutoCommit); err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
-			return
-		}
-	} else {
-		body := plan.toBody(ctx)
-		res, err := instance.RestconfClient.PatchData(plan.getPathShort(), body)
-		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-			_, err = instance.RestconfClient.PutData(plan.getPath(), body)
-		}
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
-			return
-		}
+	if err := instance.Prepare(); err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
+		return
 	}
 
-	plan.Id = types.StringValue(plan.getPath())
+	body := yangToBodyXML(ctx, plan.getXPath(), plan.Attributes, plan.Lists)
+	if err := helpers.EditConfig(ctx, instance.NetconfClient, body, instance.AutoCommit); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object, got error: %s", err))
+		return
+	}
 
+	plan.Id = types.StringValue(plan.getXPath())
 	if plan.Attributes.IsUnknown() {
 		plan.Attributes = types.MapNull(types.StringType)
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Create finished successfully", plan.getPath()))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Create finished successfully", plan.getXPath()))
 
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -187,6 +188,7 @@ func (r *DeviceConfigResource) Create(ctx context.Context, req resource.CreateRe
 func (r *DeviceConfigResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state DeviceConfig
 
+	// Read state
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -199,42 +201,34 @@ func (r *DeviceConfigResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.getPath()))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", state.getXPath()))
 
-	if r.data.Transport == "netconf" {
-		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
-		if locked {
-			defer instance.NetconfOpMutex.Unlock()
-		}
-		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
+	locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
+	if locked {
+		defer instance.NetconfOpMutex.Unlock()
+	}
+	defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-		filter := helpers.GetXpathFilter(state.getXPath())
-		res, err := instance.NetconfClient.GetConfig(ctx, "running", filter)
-		if helpers.IsGetConfigResponseEmpty(&res) {
-			state.Attributes = types.MapNull(types.StringType)
-			state.Lists = make([]DeviceConfigList, 0)
-		} else {
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
-				return
-			}
-			state.fromBodyXML(ctx, res.Res)
-		}
-	} else {
-		res, err := instance.RestconfClient.GetData(state.getPath(), restconf.Query("content", "config"))
-		if res.StatusCode == 404 {
-			state.Attributes = types.MapNull(types.StringType)
-			state.Lists = make([]DeviceConfigList, 0)
-		} else {
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read object, got error: %s", err))
-				return
-			}
-			state.fromBody(ctx, res.Res)
-		}
+	if err := instance.Prepare(); err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
+		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", state.getPath()))
+	res, err := instance.NetconfClient.GetConfig(ctx, "running", helpers.GetXpathFilter(state.getXPath()))
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read object, got error: %s", helpers.FormatNetconfError(err)))
+		return
+	}
+
+	if helpers.IsGetConfigResponseEmpty(&res) && helpers.IsListPath(state.getXPath()) {
+		tflog.Debug(ctx, fmt.Sprintf("%s: Object does not exist", state.getXPath()))
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	state.Attributes, state.Lists = yangFromBodyXML(ctx, res.Res, state.getXPath(), state.Attributes, state.Lists)
+
+	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", state.getXPath()))
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -243,12 +237,14 @@ func (r *DeviceConfigResource) Read(ctx context.Context, req resource.ReadReques
 func (r *DeviceConfigResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state DeviceConfig
 
+	// Read plan
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
+	// Read state
 	diags = req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -261,54 +257,31 @@ func (r *DeviceConfigResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.getPath()))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Update", plan.getXPath()))
 
-	if r.data.Transport == "netconf" {
-		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
-		if locked {
-			defer instance.NetconfOpMutex.Unlock()
-		}
-		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
+	locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
+	if locked {
+		defer instance.NetconfOpMutex.Unlock()
+	}
+	defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-		body := plan.toBodyXML(ctx)
-		if err := helpers.EditConfig(ctx, instance.NetconfClient, body, instance.AutoCommit); err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
-			return
-		}
-
-		deletedListItems := plan.getDeletedListItems(ctx, state)
-		tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
-		for _, item := range deletedListItems {
-			deleteBody := netconf.Body{}
-			deleteBody = helpers.RemoveFromXPath(deleteBody, helpers.ConvertRestconfPathToXPath(item))
-			if err := helpers.EditConfig(ctx, instance.NetconfClient, deleteBody.Res(), instance.AutoCommit); err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete list item (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
-				return
-			}
-		}
-	} else {
-		body := plan.toBody(ctx)
-		res, err := instance.RestconfClient.PatchData(plan.getPathShort(), body)
-		if len(res.Errors.Error) > 0 && res.Errors.Error[0].ErrorMessage == "patch to a nonexistent resource" {
-			_, err = instance.RestconfClient.PutData(plan.getPath(), body)
-		}
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to configure object (PATCH), got error: %s", err))
-			return
-		}
-
-		deletedListItems := plan.getDeletedListItems(ctx, state)
-		tflog.Debug(ctx, fmt.Sprintf("List items to delete: %+v", deletedListItems))
-		for _, i := range deletedListItems {
-			res, err := instance.RestconfClient.DeleteData(i)
-			if err != nil && res.StatusCode != 404 {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
-				return
-			}
-		}
+	if err := instance.Prepare(); err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
+		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Update finished successfully", plan.getPath()))
+	body := yangToBodyXML(ctx, plan.getXPath(), plan.Attributes, plan.Lists)
+	body = yangAddDeletedItemsXML(ctx, body, plan.getXPath(), plan.Lists, state.Lists)
+	if err := helpers.EditConfig(ctx, instance.NetconfClient, body, instance.AutoCommit); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update object, got error: %s", err))
+		return
+	}
+
+	if plan.Attributes.IsUnknown() {
+		plan.Attributes = types.MapNull(types.StringType)
+	}
+
+	tflog.Debug(ctx, fmt.Sprintf("%s: Update finished successfully", plan.getXPath()))
 
 	diags = resp.State.Set(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -317,6 +290,7 @@ func (r *DeviceConfigResource) Update(ctx context.Context, req resource.UpdateRe
 func (r *DeviceConfigResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state DeviceConfig
 
+	// Read state
 	diags := req.State.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -329,43 +303,53 @@ func (r *DeviceConfigResource) Delete(ctx context.Context, req resource.DeleteRe
 		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.getPath()))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Delete", state.getXPath()))
 
-	if state.Delete.ValueBool() {
-		if r.data.Transport == "netconf" {
-			locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
-			if locked {
-				defer instance.NetconfOpMutex.Unlock()
-			}
-			defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
+	if state.Delete.ValueBool() && state.Path.ValueString() != "" {
+		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, true)
+		if locked {
+			defer instance.NetconfOpMutex.Unlock()
+		}
+		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-			body := netconf.Body{}
-			body = helpers.RemoveFromXPath(body, state.getXPath())
-			if err := helpers.EditConfig(ctx, instance.NetconfClient, body.Res(), instance.AutoCommit); err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
-				return
-			}
-		} else {
-			res, err := instance.RestconfClient.DeleteData(state.getPath())
-			if err != nil && res.StatusCode != 404 {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
-				return
-			}
+		if err := instance.Prepare(); err != nil {
+			resp.Diagnostics.AddError("Client Error", err.Error())
+			return
+		}
+
+		body := helpers.RemoveFromXPath(netconf.Body{}, state.getXPath()).Res()
+		if err := helpers.EditConfig(ctx, instance.NetconfClient, body, instance.AutoCommit); err != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete object, got error: %s", err))
+			return
 		}
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Delete finished successfully", state.getPath()))
+	tflog.Debug(ctx, fmt.Sprintf("%s: Delete finished successfully", state.getXPath()))
 
 	resp.State.RemoveResource(ctx)
 }
 
 func (r *DeviceConfigResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	id, instance := splitImportInstance(req.ID)
+	device, xpath, _ := strings.Cut(id, ",")
+	if device == "" || strings.HasPrefix(xpath, "/") {
+		resp.Diagnostics.AddError(
+			"Unexpected Import Identifier",
+			fmt.Sprintf("Expected import identifier with format: '<device>', '<device>,<path>' or '<device>,<path>,<instance>', where <path> is an XPath relative to the device config. Got: %q", req.ID),
+		)
+		return
+	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Import", req.ID))
+	state := DeviceConfig{Device: types.StringValue(device), Path: types.StringValue(xpath)}
+	if xpath == "" {
+		state.Path = types.StringNull()
+	}
 
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("path"), req.ID)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
-
-	tflog.Debug(ctx, fmt.Sprintf("%s: Import finished successfully", req.ID))
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("device"), state.Device)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("path"), state.Path)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), state.getXPath())...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("delete"), true)...)
+	if instance != "" {
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("instance"), instance)...)
+	}
 }

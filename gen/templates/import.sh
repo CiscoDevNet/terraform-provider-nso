@@ -1,1 +1,1 @@
-terraform import nso_{{snakeCase .Name}}.example "{{getExamplePath .Path .Attributes}}"
+terraform import nso_{{snakeCase .Name}}.example "{{getImportId .Attributes}}"

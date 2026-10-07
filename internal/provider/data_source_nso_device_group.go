@@ -23,12 +23,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/netascode/go-restconf"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -42,7 +42,7 @@ func NewDeviceGroupDataSource() datasource.DataSource {
 }
 
 type DeviceGroupDataSource struct {
-	clients map[string]*restconf.Client
+	data *NsoProviderData
 }
 
 func (d *DeviceGroupDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -60,7 +60,7 @@ func (d *DeviceGroupDataSource) Schema(ctx context.Context, req datasource.Schem
 				Optional:            true,
 			},
 			"id": schema.StringAttribute{
-				MarkdownDescription: "The RESTCONF path.",
+				MarkdownDescription: "The XPath of the retrieved object.",
 				Computed:            true,
 			},
 			"name": schema.StringAttribute{
@@ -86,7 +86,7 @@ func (d *DeviceGroupDataSource) Configure(_ context.Context, req datasource.Conf
 		return
 	}
 
-	d.clients = req.ProviderData.(map[string]*restconf.Client)
+	d.data = req.ProviderData.(*NsoProviderData)
 }
 
 func (d *DeviceGroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
@@ -99,25 +99,33 @@ func (d *DeviceGroupDataSource) Read(ctx context.Context, req datasource.ReadReq
 		return
 	}
 
-	if _, ok := d.clients[config.Instance.ValueString()]; !ok {
+	instance, ok := d.data.Instances[config.Instance.ValueString()]
+	if !ok {
 		resp.Diagnostics.AddAttributeError(path.Root("instance"), "Invalid instance", fmt.Sprintf("Instance '%s' does not exist in provider configuration.", config.Instance.ValueString()))
 		return
 	}
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", config.getPath()))
 
-	res, err := d.clients[config.Instance.ValueString()].GetData(config.getPath(), restconf.Query("content", "config"))
-	if res.StatusCode == 404 {
-		config = DeviceGroupData{Instance: config.Instance}
-	} else {
-		if err != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
-			return
-		}
+	// Serialize NETCONF operations when reuse disabled (concurrent reads allowed when reuse enabled)
+	locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
+	if locked {
+		defer instance.NetconfOpMutex.Unlock()
+	}
+	defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
 
-		config.fromBody(ctx, res.Res)
+	if err := instance.Prepare(); err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
+		return
 	}
 
+	res, err := instance.NetconfClient.GetConfig(ctx, "running", helpers.GetXpathFilter(config.getXPath()))
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", helpers.FormatNetconfError(err)))
+		return
+	}
+
+	config.fromBodyXML(ctx, res.Res)
 	config.Id = types.StringValue(config.getPath())
 
 	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", config.getPath()))

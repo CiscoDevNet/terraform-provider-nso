@@ -68,7 +68,7 @@ func TestAccDataSourceNso{{camelCase .Name}}(t *testing.T) {
 {{- if .TestPrerequisites}}
 const testAccDataSourceNso{{camelCase .Name}}PrerequisitesConfig = `
 {{- range $index, $item := .TestPrerequisites}}
-resource "nso_restconf" "PreReq{{$index}}" {
+resource "nso_netconf" "PreReq{{$index}}" {
 	path = "{{.Path}}"
 	{{- if .NoDelete}}
 	delete = false
@@ -98,7 +98,7 @@ resource "nso_restconf" "PreReq{{$index}}" {
 	]
 	{{- end}}
 	{{- if .Dependencies}}
-	depends_on = [{{range .Dependencies}}nso_restconf.PreReq{{.}}, {{end}}]
+	depends_on = [{{range .Dependencies}}nso_netconf.PreReq{{.}}, {{end}}]
 	{{- end}}
 }
 {{ end}}
@@ -137,7 +137,7 @@ resource "nso_{{snakeCase $name}}" "test" {
 	{{- end}}
 	{{- end}}
 	{{- if .TestPrerequisites}}
-	depends_on = [{{range $index, $item := .TestPrerequisites}}nso_restconf.PreReq{{$index}}, {{end}}]
+	depends_on = [{{range $index, $item := .TestPrerequisites}}nso_netconf.PreReq{{$index}}, {{end}}]
 	{{- end}}
 }
 

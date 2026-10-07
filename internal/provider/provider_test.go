@@ -43,7 +43,7 @@ func testAccPreCheck(t *testing.T) {
 	if v := os.Getenv("NSO_PASSWORD"); v == "" {
 		t.Fatal("NSO_PASSWORD env variable must be set for acceptance tests")
 	}
-	if v := os.Getenv("NSO_URL"); v == "" {
-		t.Fatal("NSO_URL env variable must be set for acceptance tests")
+	if v := os.Getenv("NSO_HOST"); v == "" {
+		t.Fatal("NSO_HOST env variable must be set for acceptance tests")
 	}
 }

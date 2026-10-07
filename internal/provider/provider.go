@@ -29,7 +29,6 @@ import (
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -37,11 +36,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/netascode/go-netconf"
-	"github.com/netascode/go-restconf"
-)
-
-const (
-	YangPatch = false
 )
 
 // NsoProvider defines the provider implementation.
@@ -56,9 +50,7 @@ type NsoProvider struct {
 type NsoProviderModel struct {
 	Username           types.String               `tfsdk:"username"`
 	Password           types.String               `tfsdk:"password"`
-	URL                types.String               `tfsdk:"url"`
 	Host               types.String               `tfsdk:"host"`
-	Transport          types.String               `tfsdk:"transport"`
 	Insecure           types.Bool                 `tfsdk:"insecure"`
 	Retries            types.Int64                `tfsdk:"retries"`
 	AttemptTimeout     types.Int64                `tfsdk:"attempt_timeout"`
@@ -71,7 +63,6 @@ type NsoProviderModel struct {
 
 type NsoProviderModelInstance struct {
 	Name types.String `tfsdk:"name"`
-	URL  types.String `tfsdk:"url"`
 	Host types.String `tfsdk:"host"`
 }
 
@@ -92,59 +83,48 @@ func (p *NsoProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 				Optional:            true,
 				Sensitive:           true,
 			},
-			"transport": schema.StringAttribute{
-				MarkdownDescription: "Transport protocol to use for communicating with NSO. Valid values are `restconf` and `netconf`. This can also be set as the NSO_TRANSPORT environment variable. Defaults to `restconf`.",
-				Optional:            true,
-				Validators: []validator.String{
-					stringvalidator.OneOf("restconf", "netconf"),
-				},
-			},
-			"url": schema.StringAttribute{
-				MarkdownDescription: "URL of the Cisco NSO instance (RESTCONF transport). Optionally a port can be added with `:12345`. The default port is `443`. This can also be set as the NSO_URL environment variable.",
-				Optional:            true,
-			},
 			"host": schema.StringAttribute{
-				MarkdownDescription: "Hostname or IP address of the Cisco NSO instance (NETCONF transport). Optionally a port can be added with `:2022`. The default port is `2022`. This can also be set as the NSO_HOST environment variable.",
+				MarkdownDescription: "Hostname or IP address of the Cisco NSO NETCONF interface. Optionally a port can be added with `:12345`. The default port is `2022`. This can also be set as the NSO_HOST environment variable.",
 				Optional:            true,
 			},
 			"insecure": schema.BoolAttribute{
-				MarkdownDescription: "Allow insecure HTTPS client (RESTCONF) or skip SSH host key verification (NETCONF). This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.",
+				MarkdownDescription: "Skip SSH host key verification. This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.",
 				Optional:            true,
 			},
 			"retries": schema.Int64Attribute{
-				MarkdownDescription: "Number of retries for API calls. This can also be set as the NSO_RETRIES environment variable. Defaults to `1` (RESTCONF) or `3` (NETCONF).",
+				MarkdownDescription: "Number of retries for NETCONF operations. This can also be set as the NSO_RETRIES environment variable. Defaults to `3`.",
 				Optional:            true,
 				Validators: []validator.Int64{
 					int64validator.Between(0, 99),
 				},
 			},
 			"attempt_timeout": schema.Int64Attribute{
-				MarkdownDescription: "Timeout in seconds for a single NETCONF operation attempt. Only used with NETCONF transport. This can also be set as the NSO_ATTEMPT_TIMEOUT environment variable. Defaults to `30`.",
+				MarkdownDescription: "Timeout in seconds for a single NETCONF operation attempt. This can also be set as the NSO_ATTEMPT_TIMEOUT environment variable. Defaults to `30`.",
 				Optional:            true,
 				Validators: []validator.Int64{
 					int64validator.Between(1, 3600),
 				},
 			},
 			"total_timeout": schema.Int64Attribute{
-				MarkdownDescription: "Total timeout in seconds across all NETCONF retries. Only used with NETCONF transport. This can also be set as the NSO_TOTAL_TIMEOUT environment variable. Defaults to `120`.",
+				MarkdownDescription: "Total timeout in seconds across all NETCONF retries. This can also be set as the NSO_TOTAL_TIMEOUT environment variable. Defaults to `120`.",
 				Optional:            true,
 				Validators: []validator.Int64{
 					int64validator.Between(1, 7200),
 				},
 			},
 			"lock_release_timeout": schema.Int64Attribute{
-				MarkdownDescription: "Timeout in seconds to wait for NETCONF datastore lock release. Only used with NETCONF transport. This can also be set as the NSO_LOCK_RELEASE_TIMEOUT environment variable. Defaults to `120`.",
+				MarkdownDescription: "Timeout in seconds to wait for a NETCONF datastore lock to be released. This can also be set as the NSO_LOCK_RELEASE_TIMEOUT environment variable. Defaults to `120`.",
 				Optional:            true,
 				Validators: []validator.Int64{
 					int64validator.Between(1, 7200),
 				},
 			},
 			"reuse_connection": schema.BoolAttribute{
-				MarkdownDescription: "Keep NETCONF sessions open for reuse across operations. Only used with NETCONF transport. This can also be set as the NSO_REUSE_CONNECTION environment variable. Defaults to `true`.",
+				MarkdownDescription: "Keep NETCONF sessions open for reuse across operations. **Required when auto_commit=false**. This can also be set as the NSO_REUSE_CONNECTION environment variable. Defaults to `true`.",
 				Optional:            true,
 			},
 			"auto_commit": schema.BoolAttribute{
-				MarkdownDescription: "Automatically commit the candidate datastore after each NETCONF edit-config. Only used with NETCONF transport. This can also be set as the NSO_AUTO_COMMIT environment variable. Defaults to `true`.",
+				MarkdownDescription: "Automatically commit the candidate datastore after each resource operation. Only applies when the NSO NETCONF northbound interface exposes the candidate datastore; otherwise changes are written to the running datastore directly. **Requires reuse_connection=true when disabled**. This can also be set as the NSO_AUTO_COMMIT environment variable. Defaults to `true`.",
 				Optional:            true,
 			},
 			"instances": schema.ListNestedAttribute{
@@ -156,13 +136,9 @@ func (p *NsoProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 							MarkdownDescription: "Instance name.",
 							Required:            true,
 						},
-						"url": schema.StringAttribute{
-							MarkdownDescription: "URL of the Cisco NSO instance (RESTCONF transport).",
-							Optional:            true,
-						},
 						"host": schema.StringAttribute{
-							MarkdownDescription: "Hostname or IP address of the Cisco NSO instance (NETCONF transport).",
-							Optional:            true,
+							MarkdownDescription: "Hostname or IP address of the Cisco NSO NETCONF interface. Optionally a port can be added with `:12345`. The default port is `2022`.",
+							Required:            true,
 						},
 					},
 				},
@@ -177,17 +153,6 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
-	}
-
-	// Resolve transport
-	var transport string
-	if config.Transport.IsNull() || config.Transport.IsUnknown() {
-		transport = os.Getenv("NSO_TRANSPORT")
-		if transport == "" {
-			transport = "restconf"
-		}
-	} else {
-		transport = config.Transport.ValueString()
 	}
 
 	// Resolve username
@@ -222,6 +187,25 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		return
 	}
 
+	// Resolve host
+	var host string
+	if config.Host.IsUnknown() {
+		resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as host")
+		return
+	}
+	if config.Host.IsNull() {
+		host = os.Getenv("NSO_HOST")
+		if host == "" && len(config.Instances) > 0 {
+			host = config.Instances[0].Host.ValueString()
+		}
+	} else {
+		host = config.Host.ValueString()
+	}
+	if host == "" {
+		resp.Diagnostics.AddError("Unable to find host", "Host cannot be an empty string")
+		return
+	}
+
 	// Resolve insecure
 	var insecure bool
 	if config.Insecure.IsUnknown() {
@@ -248,11 +232,7 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 	if config.Retries.IsNull() {
 		retriesStr := os.Getenv("NSO_RETRIES")
 		if retriesStr == "" {
-			if transport == "netconf" {
-				retries = 3
-			} else {
-				retries = 1
-			}
+			retries = 3
 		} else {
 			retries, _ = strconv.ParseInt(retriesStr, 0, 64)
 		}
@@ -260,203 +240,126 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		retries = config.Retries.ValueInt64()
 	}
 
-	providerData := &NsoProviderData{
-		Transport: transport,
-		Instances: make(map[string]*NsoInstanceData),
+	// Resolve attempt timeout
+	var attemptTimeout int64
+	if config.AttemptTimeout.IsNull() || config.AttemptTimeout.IsUnknown() {
+		attemptTimeoutStr := os.Getenv("NSO_ATTEMPT_TIMEOUT")
+		if attemptTimeoutStr == "" {
+			attemptTimeout = 30
+		} else {
+			attemptTimeout, _ = strconv.ParseInt(attemptTimeoutStr, 0, 64)
+		}
+	} else {
+		attemptTimeout = config.AttemptTimeout.ValueInt64()
 	}
 
-	if transport == "netconf" {
-		// Resolve NETCONF-specific settings
-		var attemptTimeout int64
-		if config.AttemptTimeout.IsNull() || config.AttemptTimeout.IsUnknown() {
-			attemptTimeoutStr := os.Getenv("NSO_ATTEMPT_TIMEOUT")
-			if attemptTimeoutStr == "" {
-				attemptTimeout = 30
-			} else {
-				attemptTimeout, _ = strconv.ParseInt(attemptTimeoutStr, 0, 64)
-			}
+	// Resolve total timeout
+	var totalTimeout int64
+	if config.TotalTimeout.IsNull() || config.TotalTimeout.IsUnknown() {
+		totalTimeoutStr := os.Getenv("NSO_TOTAL_TIMEOUT")
+		if totalTimeoutStr == "" {
+			totalTimeout = 120
 		} else {
-			attemptTimeout = config.AttemptTimeout.ValueInt64()
+			totalTimeout, _ = strconv.ParseInt(totalTimeoutStr, 0, 64)
 		}
+	} else {
+		totalTimeout = config.TotalTimeout.ValueInt64()
+	}
 
-		var totalTimeout int64
-		if config.TotalTimeout.IsNull() || config.TotalTimeout.IsUnknown() {
-			totalTimeoutStr := os.Getenv("NSO_TOTAL_TIMEOUT")
-			if totalTimeoutStr == "" {
-				totalTimeout = 120
-			} else {
-				totalTimeout, _ = strconv.ParseInt(totalTimeoutStr, 0, 64)
-			}
+	// Resolve lock release timeout
+	var lockReleaseTimeout int64
+	if config.LockReleaseTimeout.IsNull() || config.LockReleaseTimeout.IsUnknown() {
+		lockReleaseTimeoutStr := os.Getenv("NSO_LOCK_RELEASE_TIMEOUT")
+		if lockReleaseTimeoutStr == "" {
+			lockReleaseTimeout = 120
 		} else {
-			totalTimeout = config.TotalTimeout.ValueInt64()
+			lockReleaseTimeout, _ = strconv.ParseInt(lockReleaseTimeoutStr, 0, 64)
 		}
+	} else {
+		lockReleaseTimeout = config.LockReleaseTimeout.ValueInt64()
+	}
 
-		var lockReleaseTimeout int64
-		if config.LockReleaseTimeout.IsNull() || config.LockReleaseTimeout.IsUnknown() {
-			lockReleaseTimeoutStr := os.Getenv("NSO_LOCK_RELEASE_TIMEOUT")
-			if lockReleaseTimeoutStr == "" {
-				lockReleaseTimeout = 120
-			} else {
-				lockReleaseTimeout, _ = strconv.ParseInt(lockReleaseTimeoutStr, 0, 64)
-			}
+	// Resolve reuse connection
+	var reuseConnection bool
+	if config.ReuseConnection.IsNull() || config.ReuseConnection.IsUnknown() {
+		reuseStr := os.Getenv("NSO_REUSE_CONNECTION")
+		if reuseStr == "" {
+			reuseConnection = true
 		} else {
-			lockReleaseTimeout = config.LockReleaseTimeout.ValueInt64()
+			reuseConnection, _ = strconv.ParseBool(reuseStr)
 		}
+	} else {
+		reuseConnection = config.ReuseConnection.ValueBool()
+	}
 
-		var reuseConnection bool
-		if config.ReuseConnection.IsNull() || config.ReuseConnection.IsUnknown() {
-			reuseStr := os.Getenv("NSO_REUSE_CONNECTION")
-			if reuseStr == "" {
-				reuseConnection = true
-			} else {
-				reuseConnection, _ = strconv.ParseBool(reuseStr)
-			}
+	// Resolve auto commit
+	var autoCommit bool
+	if config.AutoCommit.IsNull() || config.AutoCommit.IsUnknown() {
+		autoCommitStr := os.Getenv("NSO_AUTO_COMMIT")
+		if autoCommitStr == "" {
+			autoCommit = true
 		} else {
-			reuseConnection = config.ReuseConnection.ValueBool()
+			autoCommit, _ = strconv.ParseBool(autoCommitStr)
 		}
+	} else {
+		autoCommit = config.AutoCommit.ValueBool()
+	}
 
-		var autoCommit bool
-		if config.AutoCommit.IsNull() || config.AutoCommit.IsUnknown() {
-			autoCommitStr := os.Getenv("NSO_AUTO_COMMIT")
-			if autoCommitStr == "" {
-				autoCommit = true
-			} else {
-				autoCommit, _ = strconv.ParseBool(autoCommitStr)
-			}
-		} else {
-			autoCommit = config.AutoCommit.ValueBool()
-		}
+	// Validate configuration dependencies
+	if !autoCommit && !reuseConnection {
+		resp.Diagnostics.AddError(
+			"Invalid Configuration",
+			"Manual commit mode (auto_commit=false) requires connection reuse (reuse_connection=true). "+
+				"Without connection reuse, staged candidate configuration changes would be lost when "+
+				"connections close between resource operations. Either set auto_commit=true or reuse_connection=true.",
+		)
+		return
+	}
 
-		// Resolve NETCONF host
-		var host string
-		if config.Host.IsUnknown() {
-			resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as host")
-			return
-		}
-		if config.Host.IsNull() {
-			host = os.Getenv("NSO_HOST")
-			if host == "" && len(config.Instances) > 0 {
-				host = config.Instances[0].Host.ValueString()
-			}
-		} else {
-			host = config.Host.ValueString()
-		}
-		if host == "" {
-			resp.Diagnostics.AddError("Unable to find host", "Host cannot be an empty string when transport is netconf")
-			return
-		}
-
+	newInstance := func(host string) (*NsoInstanceData, error) {
 		netconfHost, netconfPort := parseHostPort(host, 2022)
-		logger := helpers.NewTflogAdapter(netconfHost)
-
 		opts := []func(*netconf.Client){
+			netconf.Port(netconfPort),
 			netconf.Username(username),
 			netconf.Password(password),
 			netconf.MaxRetries(int(retries)),
 			netconf.AttemptTimeout(time.Duration(attemptTimeout) * time.Second),
 			netconf.TotalTimeout(time.Duration(totalTimeout) * time.Second),
 			netconf.LockReleaseTimeout(time.Duration(lockReleaseTimeout) * time.Second),
-			netconf.WithLogger(logger),
-		}
-		if netconfPort != 830 {
-			opts = append(opts, netconf.Port(netconfPort))
+			netconf.WithLogger(helpers.NewTflogAdapter(netconfHost)),
 		}
 		if insecure {
 			opts = append(opts, netconf.InsecureSkipHostKeyVerification())
 		}
-
 		c, err := netconf.NewClient(netconfHost, opts...)
 		if err != nil {
-			resp.Diagnostics.AddError("Unable to create client", "Unable to create NETCONF client:\n\n"+err.Error())
-			return
+			return nil, err
 		}
-		if err := c.Open(); err != nil {
-			resp.Diagnostics.AddError("Unable to connect", "Unable to establish NETCONF connection:\n\n"+err.Error())
-			return
-		}
-		helpers.BuildNamespaceMap(c.Capabilities)
-		providerData.Instances[""] = &NsoInstanceData{
+		return &NsoInstanceData{
 			NetconfClient:   c,
 			AutoCommit:      autoCommit,
 			ReuseConnection: reuseConnection,
-		}
+		}, nil
+	}
 
-		for _, instance := range config.Instances {
-			instanceHost := instance.Host.ValueString()
-			if instanceHost == "" {
-				resp.Diagnostics.AddError(
-					"Unable to create client",
-					fmt.Sprintf("Instance %q must have a host when transport is netconf", instance.Name.ValueString()),
-				)
-				return
-			}
-			iHost, iPort := parseHostPort(instanceHost, 2022)
-			iLogger := helpers.NewTflogAdapter(iHost)
-			iOpts := []func(*netconf.Client){
-				netconf.Username(username),
-				netconf.Password(password),
-				netconf.MaxRetries(int(retries)),
-				netconf.AttemptTimeout(time.Duration(attemptTimeout) * time.Second),
-				netconf.TotalTimeout(time.Duration(totalTimeout) * time.Second),
-				netconf.LockReleaseTimeout(time.Duration(lockReleaseTimeout) * time.Second),
-				netconf.WithLogger(iLogger),
-			}
-			if iPort != 830 {
-				iOpts = append(iOpts, netconf.Port(iPort))
-			}
-			if insecure {
-				iOpts = append(iOpts, netconf.InsecureSkipHostKeyVerification())
-			}
-			ic, err := netconf.NewClient(iHost, iOpts...)
-			if err != nil {
-				resp.Diagnostics.AddError("Unable to create client", "Unable to create NETCONF client:\n\n"+err.Error())
-				return
-			}
-			providerData.Instances[instance.Name.ValueString()] = &NsoInstanceData{
-				NetconfClient:   ic,
-				AutoCommit:      autoCommit,
-				ReuseConnection: reuseConnection,
-			}
-		}
-	} else {
-		// RESTCONF transport (existing behavior)
-		var url string
-		if config.URL.IsUnknown() {
-			resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as url")
-			return
-		}
-		if config.URL.IsNull() {
-			url = os.Getenv("NSO_URL")
-			if url == "" && len(config.Instances) > 0 {
-				url = config.Instances[0].URL.ValueString()
-			}
-		} else {
-			url = config.URL.ValueString()
-		}
-		if url == "" {
-			resp.Diagnostics.AddError("Unable to find url", "URL cannot be an empty string when transport is restconf")
-			return
-		}
+	providerData := &NsoProviderData{
+		Instances: make(map[string]*NsoInstanceData),
+	}
 
-		c, err := restconf.NewClient(url, username, password, insecure, restconf.MaxRetries(int(retries)), restconf.SkipDiscovery("/restconf", true))
+	instance, err := newInstance(host)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to create client", "Unable to create NETCONF client:\n\n"+err.Error())
+		return
+	}
+	providerData.Instances[""] = instance
+
+	for _, i := range config.Instances {
+		instance, err := newInstance(i.Host.ValueString())
 		if err != nil {
-			resp.Diagnostics.AddError("Unable to create client", "Unable to create restconf client:\n\n"+err.Error())
+			resp.Diagnostics.AddError("Unable to create client", fmt.Sprintf("Unable to create NETCONF client for instance %q:\n\n%s", i.Name.ValueString(), err.Error()))
 			return
 		}
-		providerData.Instances[""] = &NsoInstanceData{
-			RestconfClient: c,
-		}
-
-		for _, instance := range config.Instances {
-			ic, err := restconf.NewClient(instance.URL.ValueString(), username, password, insecure, restconf.MaxRetries(int(retries)), restconf.SkipDiscovery("/restconf", true))
-			if err != nil {
-				resp.Diagnostics.AddError("Unable to create client", "Unable to create restconf client:\n\n"+err.Error())
-				return
-			}
-			providerData.Instances[instance.Name.ValueString()] = &NsoInstanceData{
-				RestconfClient: ic,
-			}
-		}
+		providerData.Instances[i.Name.ValueString()] = instance
 	}
 
 	resp.DataSourceData = providerData
@@ -465,7 +368,7 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 
 func (p *NsoProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewRestconfResource,
+		NewNetconfResource,
 		NewDeviceConfigResource,
 		NewDeviceResource,
 		NewDeviceGroupResource,
@@ -474,7 +377,7 @@ func (p *NsoProvider) Resources(ctx context.Context) []func() resource.Resource 
 
 func (p *NsoProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		NewRestconfDataSource,
+		NewNetconfDataSource,
 		NewDeviceConfigDataSource,
 		NewDeviceDataSource,
 		NewDeviceGroupDataSource,

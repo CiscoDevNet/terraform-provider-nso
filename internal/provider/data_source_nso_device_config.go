@@ -22,13 +22,11 @@ import (
 	"fmt"
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/netascode/go-restconf"
 )
 
 // Ensure the implementation satisfies the expected interfaces.
@@ -52,7 +50,7 @@ func (d *DeviceConfigDataSource) Metadata(_ context.Context, req datasource.Meta
 func (d *DeviceConfigDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "Retrieves a config part of an NSO device.",
+		MarkdownDescription: "This data source can read a config part of an NSO device via NETCONF.",
 
 		Attributes: map[string]schema.Attribute{
 			"instance": schema.StringAttribute{
@@ -60,7 +58,7 @@ func (d *DeviceConfigDataSource) Schema(ctx context.Context, req datasource.Sche
 				Optional:            true,
 			},
 			"id": schema.StringAttribute{
-				MarkdownDescription: "The RESTCONF path of the retrieved configuration.",
+				MarkdownDescription: "The XPath of the retrieved object.",
 				Computed:            true,
 			},
 			"device": schema.StringAttribute{
@@ -68,13 +66,13 @@ func (d *DeviceConfigDataSource) Schema(ctx context.Context, req datasource.Sche
 				Required:            true,
 			},
 			"path": schema.StringAttribute{
-				MarkdownDescription: "A RESTCONF/YANG config path, e.g. `tailf-ned-cisco-ios:access-list/access-list=1`.",
+				MarkdownDescription: "An XPath relative to the device config container (`/tailf-ncs:devices/device[name='<device>']/config`), e.g. `tailf-ned-cisco-ios:interface/Loopback[name='0']`.",
 				Optional:            true,
 			},
 			"attributes": schema.MapAttribute{
-				MarkdownDescription: "Map of key-value pairs which represents the YANG leafs and its values.",
-				ElementType:         types.StringType,
+				MarkdownDescription: "Map of key-value pairs which represents the YANG leafs directly below the object and their values.",
 				Computed:            true,
+				ElementType:         types.StringType,
 			},
 		},
 	}
@@ -89,8 +87,9 @@ func (d *DeviceConfigDataSource) Configure(_ context.Context, req datasource.Con
 }
 
 func (d *DeviceConfigDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	var config, state DeviceConfigData
+	var config DeviceConfigDataSourceModel
 
+	// Read config
 	diags := req.Config.Get(ctx, &config)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -103,75 +102,32 @@ func (d *DeviceConfigDataSource) Read(ctx context.Context, req datasource.ReadRe
 		return
 	}
 
-	restconfPath := "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config"
-	if config.Path.ValueString() != "" {
-		restconfPath = "tailf-ncs:devices/device=" + config.Device.ValueString() + "/config/" + config.Path.ValueString()
+	xpath := deviceConfigXPath(config.Device.ValueString(), config.Path.ValueString())
+
+	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", xpath))
+
+	locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
+	if locked {
+		defer instance.NetconfOpMutex.Unlock()
+	}
+	defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
+
+	if err := instance.Prepare(); err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
+		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Beginning Read", restconfPath))
-
-	if d.data.Transport == "netconf" {
-		locked := helpers.AcquireNetconfLock(&instance.NetconfOpMutex, instance.ReuseConnection, false)
-		if locked {
-			defer instance.NetconfOpMutex.Unlock()
-		}
-		defer helpers.CloseNetconfConnection(ctx, instance.NetconfClient, instance.ReuseConnection)
-
-		xpath := helpers.ConvertRestconfPathToXPath(restconfPath)
-		filter := helpers.GetXpathFilter(xpath)
-		res, err := instance.NetconfClient.GetConfig(ctx, "running", filter)
-		if helpers.IsGetConfigResponseEmpty(&res) {
-			state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
-		} else {
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object (NETCONF), got error: %s", helpers.FormatNetconfError(err)))
-				return
-			}
-
-			state.Path = types.StringValue(restconfPath)
-			state.Id = types.StringValue(restconfPath)
-
-			attributes := make(map[string]attr.Value)
-			dataPrefix := "data" + xpath
-			for key, val := range res.Res.Get(dataPrefix).Map() {
-				if !val.Exists() || val.String() == "" {
-					attributes[key] = types.StringValue("")
-				} else {
-					attributes[key] = types.StringValue(val.String())
-				}
-			}
-			state.Attributes = types.MapValueMust(types.StringType, attributes)
-		}
-	} else {
-		res, err := instance.RestconfClient.GetData(restconfPath, restconf.Query("content", "config"))
-		if res.StatusCode == 404 {
-			state.Attributes = types.MapValueMust(types.StringType, map[string]attr.Value{})
-		} else {
-			if err != nil {
-				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", err))
-				return
-			}
-
-			state.Path = types.StringValue(restconfPath)
-			state.Id = types.StringValue(restconfPath)
-
-			attributes := make(map[string]attr.Value)
-
-			for attr, value := range res.Res.Get(helpers.LastElement(restconfPath)).Map() {
-				if value.IsObject() && len(value.Map()) == 0 {
-					attributes[attr] = types.StringValue("")
-				} else if value.Raw == "[null]" {
-					attributes[attr] = types.StringValue("")
-				} else {
-					attributes[attr] = types.StringValue(value.String())
-				}
-			}
-			state.Attributes = types.MapValueMust(types.StringType, attributes)
-		}
+	res, err := instance.NetconfClient.GetConfig(ctx, "running", helpers.GetXpathFilter(xpath))
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to retrieve object, got error: %s", helpers.FormatNetconfError(err)))
+		return
 	}
 
-	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", restconfPath))
+	config.Id = types.StringValue(xpath)
+	config.Attributes = yangDataSourceAttributes(res.Res, xpath)
 
-	diags = resp.State.Set(ctx, &state)
+	tflog.Debug(ctx, fmt.Sprintf("%s: Read finished successfully", xpath))
+
+	diags = resp.State.Set(ctx, &config)
 	resp.Diagnostics.Append(diags...)
 }
