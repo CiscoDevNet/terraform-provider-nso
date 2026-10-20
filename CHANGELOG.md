@@ -1,3 +1,7 @@
+## 0.2.2 (Unreleased)
+
+- Fix `nso_device_config` silently failing for YANG `type empty` leaves by encoding as `[null]` per RFC 7951
+
 ## 0.2.1
 
 - Fix issue where nested list paths were not translated correctly in the `nso_restconf` resource

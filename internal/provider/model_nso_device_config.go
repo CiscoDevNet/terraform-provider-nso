@@ -78,10 +78,16 @@ func (data DeviceConfig) toBody(ctx context.Context) string {
 	if root == "tailf-ncs:config" {
 		root = "config"
 	}
-	body := `{"` + root + `":{}}`
-
 	var attributes map[string]string
 	data.Attributes.ElementsAs(ctx, &attributes, false)
+
+	// When attributes and lists are both empty, this is a YANG type-empty
+	// leaf. RESTCONF requires [null] for empty leaves; an empty object {}
+	// is silently accepted by NSO but has no effect.
+	body := `{"` + root + `":{}}`
+	if len(attributes) == 0 && len(data.Lists) == 0 {
+		body = `{"` + root + `":[null]}`
+	}
 
 	for attr, value := range attributes {
 		attr = strings.ReplaceAll(attr, "/", ".")
