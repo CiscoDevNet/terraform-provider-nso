@@ -1,3 +1,7 @@
+## 0.2.2 (Unreleased)
+
+- Fix non-deterministic YANG list key ordering in `nso_device_config` RESTCONF payload
+
 ## 0.2.1
 
 - Fix issue where nested list paths were not translated correctly in the `nso_restconf` resource
