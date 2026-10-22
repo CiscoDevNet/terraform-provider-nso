@@ -1,6 +1,6 @@
 ---
 name: Device Group
-path: tailf-ncs:devices/device-group=%v
+path: /tailf-ncs:devices/device-group[name='%v']
 res_description: This resource can manage the Device Group configuration.
 ds_description: This data source can read the Device Group configuration.
 no_augment_config: true
@@ -8,19 +8,35 @@ no_delete_attributes: true
 doc_category: Device
 attributes:
   - yang_name: name
+    xpath: name
     tf_name: name
     id: true
     type: String
     description: Device group name.
     example: test-group1
   - yang_name: device-name
+    xpath: device-name
     tf_name: device_names
     type: StringList
     description: A list of device names.
-    example: ce0
+    example: tf-acc-dg-device
   - yang_name: device-group
+    xpath: device-group
     tf_name: device_groups
     type: StringList
     description: A list of device groups.
     exclude_test: true
     example: group1
+test_prerequisites:
+  - path: /tailf-ncs:devices/device[name='tf-acc-dg-device']
+    attributes:
+      - name: name
+        value: tf-acc-dg-device
+      - name: address
+        value: 192.0.2.1
+      - name: authgroup
+        value: default
+      - name: state/admin-state
+        value: southbound-locked
+      - name: device-type/cli/ned-id
+        value: cisco-ios-cli-6.115:cisco-ios-cli-6.115

@@ -1,3 +1,13 @@
+## 0.3.0 (unreleased)
+
+- BREAKING CHANGE: Communicate with NSO via NETCONF instead of RESTCONF; RESTCONF is no longer supported
+- BREAKING CHANGE: Replace provider attribute `url` (`NSO_URL`) with `host` (`NSO_HOST`), which defaults to port `2022`; the same applies to `instances[].url`
+- BREAKING CHANGE: Rename `nso_restconf` resource and data source to `nso_netconf`; `path` is now an absolute XPath, e.g. `/tailf-ncs:devices/device-group[name='GROUP1']`
+- BREAKING CHANGE: `nso_device_config` `path` is now an XPath relative to the device config, e.g. `tailf-ned-cisco-ios:interface/Loopback[name='0']`
+- BREAKING CHANGE: Resource IDs are now XPaths and import identifiers changed; existing resources must be removed from state and re-imported
+- Add provider attributes `attempt_timeout`, `total_timeout`, `lock_release_timeout`, `reuse_connection` and `auto_commit`
+- Discover NED module XML namespaces from NETCONF capabilities
+
 ## 0.2.1
 
 - Fix issue where nested list paths were not translated correctly in the `nso_restconf` resource

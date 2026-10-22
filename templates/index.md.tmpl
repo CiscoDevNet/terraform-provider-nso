@@ -12,7 +12,9 @@ The following example repositories exist to demonstrate the use of the provider:
 
 - [MPLS VPN Service Example](https://github.com/netascode/terraform-nso-service-example)
 
-It communicates with NSO instances via RESTCONF, which requires the RESTCONF API to be enabled in `ncs.conf`.
+It communicates with NSO instances via NETCONF, which requires the northbound NETCONF interface to be enabled in `ncs.conf` (it listens on port `2022` by default).
+
+Configuration changes are written to the candidate datastore and committed if NSO exposes one; otherwise they are written to the running datastore directly. Objects are addressed by XPath, for example `/tailf-ncs:devices/device[name='c1']`. Elements of NED or service modules use the YANG module name as prefix, for example `tailf-ned-cisco-ios:hostname`; the corresponding XML namespaces are discovered from the NETCONF capabilities advertised by NSO.
 
 ## Example Usage
 

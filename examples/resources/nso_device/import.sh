@@ -1,1 +1,1 @@
-terraform import nso_device.example "tailf-ncs:devices/device=test-device01"
+terraform import nso_device.example "test-device01"

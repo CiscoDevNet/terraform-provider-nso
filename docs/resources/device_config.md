@@ -3,12 +3,12 @@
 page_title: "nso_device_config Resource - terraform-provider-nso"
 subcategory: "Device"
 description: |-
-  Manages a config part of an NSO device.
+  Manages a config part of an NSO device via NETCONF. It is able to read the state and therefore reconcile configuration drift.
 ---
 
 # nso_device_config (Resource)
 
-Manages a config part of an NSO device.
+Manages a config part of an NSO device via NETCONF. It is able to read the state and therefore reconcile configuration drift.
 
 ## Example Usage
 
@@ -16,24 +16,20 @@ Manages a config part of an NSO device.
 resource "nso_device_config" "example" {
   device = "c1"
   attributes = {
-    "tailf-ned-cisco-ios:hostname" = "%s"
+    "tailf-ned-cisco-ios:hostname" = "R1"
   }
 }
 
 resource "nso_device_config" "access_list" {
   device = "c1"
-  path   = "tailf-ned-cisco-ios:access-list/access-list=1"
-  attributes = {
-    id = 1
-  }
+  path   = "tailf-ned-cisco-ios:access-list/access-list[id='1']"
   lists = [
     {
       name = "rule"
-      key  = "seq"
+      key  = "rule"
       items = [
         {
-          seq  = 10
-          rule = "permit ip any"
+          rule = "permit any"
         }
       ]
     }
@@ -50,27 +46,27 @@ resource "nso_device_config" "access_list" {
 
 ### Optional
 
-- `attributes` (Map of String) Map of key-value pairs which represents the YANG leafs and its values.
-- `delete` (Boolean) Delete object during destroy operation. Default value is `true`.
+- `attributes` (Map of String) Map of key-value pairs which represents the YANG leafs and its values. Keys are XPaths relative to `path`.
+- `delete` (Boolean) Delete object during destroy operation. Ignored when `path` is not set, as the device config container itself is never deleted. Default value is `true`.
 - `instance` (String) An instance name from the provider configuration.
 - `lists` (Attributes List) YANG lists. (see [below for nested schema](#nestedatt--lists))
-- `path` (String) A RESTCONF path.
+- `path` (String) An XPath relative to the device config container (`/tailf-ncs:devices/device[name='<device>']/config`), e.g. `tailf-ned-cisco-ios:interface/Loopback[name='0']`. If omitted, the device config container itself is managed.
 
 ### Read-Only
 
-- `id` (String) The RESTCONF path.
+- `id` (String) The XPath of the object.
 
 <a id="nestedatt--lists"></a>
 ### Nested Schema for `lists`
 
 Required:
 
-- `name` (String) YANG list name.
+- `name` (String) YANG list name, relative to `path`.
 
 Optional:
 
 - `items` (List of Map of String) List of maps of key-value pairs which represents the YANG leafs and its values.
-- `key` (String) YANG list key attribute. In case of multiple keys, those should be separated by a comma (`,`).
+- `key` (String) YANG list key attribute. In case of multiple keys, those should be separated by a comma (`,`). Required when `items` is used.
 - `values` (List of String) YANG leaf-list values.
 
 ## Import
@@ -80,5 +76,6 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import nso_device_config.example "tailf-ned-cisco-ios:access-list/access-list=1"
+# <device>,<path>
+terraform import nso_device_config.example "c1,tailf-ned-cisco-ios:access-list/access-list[id='1']"
 ```

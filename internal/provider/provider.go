@@ -21,9 +21,13 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
 	"strconv"
+	"time"
 
+	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -31,11 +35,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/netascode/go-restconf"
-)
-
-const (
-	YangPatch = false
+	"github.com/netascode/go-netconf"
 )
 
 // NsoProvider defines the provider implementation.
@@ -48,17 +48,22 @@ type NsoProvider struct {
 
 // NsoProviderModel describes the provider data model.
 type NsoProviderModel struct {
-	Username  types.String               `tfsdk:"username"`
-	Password  types.String               `tfsdk:"password"`
-	URL       types.String               `tfsdk:"url"`
-	Insecure  types.Bool                 `tfsdk:"insecure"`
-	Retries   types.Int64                `tfsdk:"retries"`
-	Instances []NsoProviderModelInstance `tfsdk:"instances"`
+	Username           types.String               `tfsdk:"username"`
+	Password           types.String               `tfsdk:"password"`
+	Host               types.String               `tfsdk:"host"`
+	Insecure           types.Bool                 `tfsdk:"insecure"`
+	Retries            types.Int64                `tfsdk:"retries"`
+	AttemptTimeout     types.Int64                `tfsdk:"attempt_timeout"`
+	TotalTimeout       types.Int64                `tfsdk:"total_timeout"`
+	LockReleaseTimeout types.Int64                `tfsdk:"lock_release_timeout"`
+	ReuseConnection    types.Bool                 `tfsdk:"reuse_connection"`
+	AutoCommit         types.Bool                 `tfsdk:"auto_commit"`
+	Instances          []NsoProviderModelInstance `tfsdk:"instances"`
 }
 
 type NsoProviderModelInstance struct {
 	Name types.String `tfsdk:"name"`
-	URL  types.String `tfsdk:"url"`
+	Host types.String `tfsdk:"host"`
 }
 
 func (p *NsoProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -78,20 +83,49 @@ func (p *NsoProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 				Optional:            true,
 				Sensitive:           true,
 			},
-			"url": schema.StringAttribute{
-				MarkdownDescription: "URL of the Cisco NSO instance. Optionally a port can be added with `:12345`. The default port is `443`. This can also be set as the NSO_URL environment variable.",
+			"host": schema.StringAttribute{
+				MarkdownDescription: "Hostname or IP address of the Cisco NSO NETCONF interface. Optionally a port can be added with `:12345`. The default port is `2022`. This can also be set as the NSO_HOST environment variable.",
 				Optional:            true,
 			},
 			"insecure": schema.BoolAttribute{
-				MarkdownDescription: "Allow insecure HTTPS client. This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.",
+				MarkdownDescription: "Skip SSH host key verification. This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.",
 				Optional:            true,
 			},
 			"retries": schema.Int64Attribute{
-				MarkdownDescription: "Number of retries for RESTCONF API calls. This can also be set as the NSO_RETRIES environment variable. Defaults to `1`.",
+				MarkdownDescription: "Number of retries for NETCONF operations. This can also be set as the NSO_RETRIES environment variable. Defaults to `3`.",
 				Optional:            true,
 				Validators: []validator.Int64{
 					int64validator.Between(0, 99),
 				},
+			},
+			"attempt_timeout": schema.Int64Attribute{
+				MarkdownDescription: "Timeout in seconds for a single NETCONF operation attempt. This can also be set as the NSO_ATTEMPT_TIMEOUT environment variable. Defaults to `30`.",
+				Optional:            true,
+				Validators: []validator.Int64{
+					int64validator.Between(1, 3600),
+				},
+			},
+			"total_timeout": schema.Int64Attribute{
+				MarkdownDescription: "Total timeout in seconds across all NETCONF retries. This can also be set as the NSO_TOTAL_TIMEOUT environment variable. Defaults to `120`.",
+				Optional:            true,
+				Validators: []validator.Int64{
+					int64validator.Between(1, 7200),
+				},
+			},
+			"lock_release_timeout": schema.Int64Attribute{
+				MarkdownDescription: "Timeout in seconds to wait for a NETCONF datastore lock to be released. This can also be set as the NSO_LOCK_RELEASE_TIMEOUT environment variable. Defaults to `120`.",
+				Optional:            true,
+				Validators: []validator.Int64{
+					int64validator.Between(1, 7200),
+				},
+			},
+			"reuse_connection": schema.BoolAttribute{
+				MarkdownDescription: "Keep NETCONF sessions open for reuse across operations. **Required when auto_commit=false**. This can also be set as the NSO_REUSE_CONNECTION environment variable. Defaults to `true`.",
+				Optional:            true,
+			},
+			"auto_commit": schema.BoolAttribute{
+				MarkdownDescription: "Automatically commit the candidate datastore after each resource operation. Only applies when the NSO NETCONF northbound interface exposes the candidate datastore; otherwise changes are written to the running datastore directly. **Requires reuse_connection=true when disabled**. This can also be set as the NSO_AUTO_COMMIT environment variable. Defaults to `true`.",
+				Optional:            true,
 			},
 			"instances": schema.ListNestedAttribute{
 				MarkdownDescription: "This can be used to manage a list of instances from a single provider. All instances must use the same credentials. Each resource and data source has an optional attribute named `instance`, which can then select an instance by its name from this list.",
@@ -102,8 +136,8 @@ func (p *NsoProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 							MarkdownDescription: "Instance name.",
 							Required:            true,
 						},
-						"url": schema.StringAttribute{
-							MarkdownDescription: "URL of the Cisco NSO instance.",
+						"host": schema.StringAttribute{
+							MarkdownDescription: "Hostname or IP address of the Cisco NSO NETCONF interface. Optionally a port can be added with `:12345`. The default port is `2022`.",
 							Required:            true,
 						},
 					},
@@ -114,7 +148,6 @@ func (p *NsoProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 }
 
 func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
-	// Retrieve provider data from configuration
 	var config NsoProviderModel
 	diags := req.Config.Get(ctx, &config)
 	resp.Diagnostics.Append(diags...)
@@ -122,97 +155,63 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		return
 	}
 
-	// User must provide a username to the provider
+	// Resolve username
 	var username string
 	if config.Username.IsUnknown() {
-		// Cannot connect to client with an unknown value
-		resp.Diagnostics.AddWarning(
-			"Unable to create client",
-			"Cannot use unknown value as username",
-		)
+		resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as username")
 		return
 	}
-
 	if config.Username.IsNull() {
 		username = os.Getenv("NSO_USERNAME")
 	} else {
 		username = config.Username.ValueString()
 	}
-
 	if username == "" {
-		// Error vs warning - empty value must stop execution
-		resp.Diagnostics.AddError(
-			"Unable to find username",
-			"Username cannot be an empty string",
-		)
+		resp.Diagnostics.AddError("Unable to find username", "Username cannot be an empty string")
 		return
 	}
 
-	// User must provide a password to the provider
+	// Resolve password
 	var password string
 	if config.Password.IsUnknown() {
-		// Cannot connect to client with an unknown value
-		resp.Diagnostics.AddWarning(
-			"Unable to create client",
-			"Cannot use unknown value as password",
-		)
+		resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as password")
 		return
 	}
-
 	if config.Password.IsNull() {
 		password = os.Getenv("NSO_PASSWORD")
 	} else {
 		password = config.Password.ValueString()
 	}
-
 	if password == "" {
-		// Error vs warning - empty value must stop execution
-		resp.Diagnostics.AddError(
-			"Unable to find password",
-			"Password cannot be an empty string",
-		)
+		resp.Diagnostics.AddError("Unable to find password", "Password cannot be an empty string")
 		return
 	}
 
-	// User must provide a username to the provider
-	var url string
-	if config.URL.IsUnknown() {
-		// Cannot connect to client with an unknown value
-		resp.Diagnostics.AddWarning(
-			"Unable to create client",
-			"Cannot use unknown value as url",
-		)
+	// Resolve host
+	var host string
+	if config.Host.IsUnknown() {
+		resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as host")
 		return
 	}
-
-	if config.URL.IsNull() {
-		url = os.Getenv("NSO_URL")
-		if url == "" && len(config.Instances) > 0 {
-			url = config.Instances[0].URL.ValueString()
+	if config.Host.IsNull() {
+		host = os.Getenv("NSO_HOST")
+		if host == "" && len(config.Instances) > 0 {
+			host = config.Instances[0].Host.ValueString()
 		}
 	} else {
-		url = config.URL.ValueString()
+		host = config.Host.ValueString()
 	}
-
-	if url == "" {
-		// Error vs warning - empty value must stop execution
-		resp.Diagnostics.AddError(
-			"Unable to find url",
-			"URL cannot be an empty string",
-		)
+	if host == "" {
+		resp.Diagnostics.AddError("Unable to find host", "Host cannot be an empty string")
 		return
 	}
 
+	// Resolve insecure
 	var insecure bool
 	if config.Insecure.IsUnknown() {
-		// Cannot connect to client with an unknown value
-		resp.Diagnostics.AddWarning(
-			"Unable to create client",
-			"Cannot use unknown value as insecure",
-		)
+		resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as insecure")
 		return
 	}
-
 	if config.Insecure.IsNull() {
 		insecureStr := os.Getenv("NSO_INSECURE")
 		if insecureStr == "" {
@@ -224,20 +223,16 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		insecure = config.Insecure.ValueBool()
 	}
 
+	// Resolve retries
 	var retries int64
 	if config.Retries.IsUnknown() {
-		// Cannot connect to client with an unknown value
-		resp.Diagnostics.AddWarning(
-			"Unable to create client",
-			"Cannot use unknown value as retries",
-		)
+		resp.Diagnostics.AddWarning("Unable to create client", "Cannot use unknown value as retries")
 		return
 	}
-
 	if config.Retries.IsNull() {
 		retriesStr := os.Getenv("NSO_RETRIES")
 		if retriesStr == "" {
-			retries = 1
+			retries = 3
 		} else {
 			retries, _ = strconv.ParseInt(retriesStr, 0, 64)
 		}
@@ -245,36 +240,135 @@ func (p *NsoProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		retries = config.Retries.ValueInt64()
 	}
 
-	clients := make(map[string]*restconf.Client)
-	c, err := restconf.NewClient(url, username, password, insecure, restconf.MaxRetries(int(retries)), restconf.SkipDiscovery("/restconf", true))
-	if err != nil {
+	// Resolve attempt timeout
+	var attemptTimeout int64
+	if config.AttemptTimeout.IsNull() || config.AttemptTimeout.IsUnknown() {
+		attemptTimeoutStr := os.Getenv("NSO_ATTEMPT_TIMEOUT")
+		if attemptTimeoutStr == "" {
+			attemptTimeout = 30
+		} else {
+			attemptTimeout, _ = strconv.ParseInt(attemptTimeoutStr, 0, 64)
+		}
+	} else {
+		attemptTimeout = config.AttemptTimeout.ValueInt64()
+	}
+
+	// Resolve total timeout
+	var totalTimeout int64
+	if config.TotalTimeout.IsNull() || config.TotalTimeout.IsUnknown() {
+		totalTimeoutStr := os.Getenv("NSO_TOTAL_TIMEOUT")
+		if totalTimeoutStr == "" {
+			totalTimeout = 120
+		} else {
+			totalTimeout, _ = strconv.ParseInt(totalTimeoutStr, 0, 64)
+		}
+	} else {
+		totalTimeout = config.TotalTimeout.ValueInt64()
+	}
+
+	// Resolve lock release timeout
+	var lockReleaseTimeout int64
+	if config.LockReleaseTimeout.IsNull() || config.LockReleaseTimeout.IsUnknown() {
+		lockReleaseTimeoutStr := os.Getenv("NSO_LOCK_RELEASE_TIMEOUT")
+		if lockReleaseTimeoutStr == "" {
+			lockReleaseTimeout = 120
+		} else {
+			lockReleaseTimeout, _ = strconv.ParseInt(lockReleaseTimeoutStr, 0, 64)
+		}
+	} else {
+		lockReleaseTimeout = config.LockReleaseTimeout.ValueInt64()
+	}
+
+	// Resolve reuse connection
+	var reuseConnection bool
+	if config.ReuseConnection.IsNull() || config.ReuseConnection.IsUnknown() {
+		reuseStr := os.Getenv("NSO_REUSE_CONNECTION")
+		if reuseStr == "" {
+			reuseConnection = true
+		} else {
+			reuseConnection, _ = strconv.ParseBool(reuseStr)
+		}
+	} else {
+		reuseConnection = config.ReuseConnection.ValueBool()
+	}
+
+	// Resolve auto commit
+	var autoCommit bool
+	if config.AutoCommit.IsNull() || config.AutoCommit.IsUnknown() {
+		autoCommitStr := os.Getenv("NSO_AUTO_COMMIT")
+		if autoCommitStr == "" {
+			autoCommit = true
+		} else {
+			autoCommit, _ = strconv.ParseBool(autoCommitStr)
+		}
+	} else {
+		autoCommit = config.AutoCommit.ValueBool()
+	}
+
+	// Validate configuration dependencies
+	if !autoCommit && !reuseConnection {
 		resp.Diagnostics.AddError(
-			"Unable to create client",
-			"Unable to create restconf client:\n\n"+err.Error(),
+			"Invalid Configuration",
+			"Manual commit mode (auto_commit=false) requires connection reuse (reuse_connection=true). "+
+				"Without connection reuse, staged candidate configuration changes would be lost when "+
+				"connections close between resource operations. Either set auto_commit=true or reuse_connection=true.",
 		)
 		return
 	}
-	clients[""] = c
 
-	for _, instance := range config.Instances {
-		c, err := restconf.NewClient(instance.URL.ValueString(), username, password, insecure, restconf.MaxRetries(int(retries)), restconf.SkipDiscovery("/restconf", true))
-		if err != nil {
-			resp.Diagnostics.AddError(
-				"Unable to create client",
-				"Unable to create restconf client:\n\n"+err.Error(),
-			)
-			return
+	newInstance := func(host string) (*NsoInstanceData, error) {
+		netconfHost, netconfPort := parseHostPort(host, 2022)
+		opts := []func(*netconf.Client){
+			netconf.Port(netconfPort),
+			netconf.Username(username),
+			netconf.Password(password),
+			netconf.MaxRetries(int(retries)),
+			netconf.AttemptTimeout(time.Duration(attemptTimeout) * time.Second),
+			netconf.TotalTimeout(time.Duration(totalTimeout) * time.Second),
+			netconf.LockReleaseTimeout(time.Duration(lockReleaseTimeout) * time.Second),
+			netconf.WithLogger(helpers.NewTflogAdapter(netconfHost)),
 		}
-		clients[instance.Name.ValueString()] = c
+		if insecure {
+			opts = append(opts, netconf.InsecureSkipHostKeyVerification())
+		}
+		c, err := netconf.NewClient(netconfHost, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return &NsoInstanceData{
+			NetconfClient:   c,
+			AutoCommit:      autoCommit,
+			ReuseConnection: reuseConnection,
+		}, nil
 	}
 
-	resp.DataSourceData = clients
-	resp.ResourceData = clients
+	providerData := &NsoProviderData{
+		Instances: make(map[string]*NsoInstanceData),
+	}
+
+	instance, err := newInstance(host)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to create client", "Unable to create NETCONF client:\n\n"+err.Error())
+		return
+	}
+	providerData.Instances[""] = instance
+
+	for _, i := range config.Instances {
+		instance, err := newInstance(i.Host.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Unable to create client", fmt.Sprintf("Unable to create NETCONF client for instance %q:\n\n%s", i.Name.ValueString(), err.Error()))
+			return
+		}
+		providerData.Instances[i.Name.ValueString()] = instance
+	}
+
+	resp.DataSourceData = providerData
+	resp.ResourceData = providerData
 }
 
 func (p *NsoProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewRestconfResource,
+		NewNetconfResource,
 		NewDeviceConfigResource,
 		NewDeviceResource,
 		NewDeviceGroupResource,
@@ -283,7 +377,7 @@ func (p *NsoProvider) Resources(ctx context.Context) []func() resource.Resource 
 
 func (p *NsoProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		NewRestconfDataSource,
+		NewNetconfDataSource,
 		NewDeviceConfigDataSource,
 		NewDeviceDataSource,
 		NewDeviceGroupDataSource,
@@ -296,4 +390,16 @@ func New(version string) func() provider.Provider {
 			version: version,
 		}
 	}
+}
+
+func parseHostPort(hostPort string, defaultPort int) (string, int) {
+	host, portStr, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return hostPort, defaultPort
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return host, defaultPort
+	}
+	return host, port
 }

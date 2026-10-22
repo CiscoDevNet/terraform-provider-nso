@@ -18,11 +18,9 @@
 package helpers
 
 import (
-	"strings"
-
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/tidwall/gjson"
+	"github.com/netascode/xmldot"
 )
 
 func Contains(s []string, str string) bool {
@@ -34,25 +32,7 @@ func Contains(s []string, str string) bool {
 	return false
 }
 
-func LastElement(path string) string {
-	pes := strings.Split(path, "/")
-	var prefix, element string
-	for _, pe := range pes {
-		// remove key
-		if strings.Contains(pe, "=") {
-			pe = pe[:strings.Index(pe, "=")]
-		}
-		if strings.Contains(pe, ":") {
-			prefix = strings.Split(pe, ":")[0]
-			element = strings.Split(pe, ":")[1]
-		} else {
-			element = pe
-		}
-	}
-	return prefix + ":" + element
-}
-
-func GetValueSlice(result []gjson.Result) []attr.Value {
+func GetXmlValueSlice(result []xmldot.Result) []attr.Value {
 	v := make([]attr.Value, len(result))
 	for r := range result {
 		v[r] = types.StringValue(result[r].String())
@@ -60,7 +40,8 @@ func GetValueSlice(result []gjson.Result) []attr.Value {
 	return v
 }
 
-func GetStringList(result []gjson.Result) types.List {
+// GetStringListXML converts a slice of xmldot.Result to a Terraform types.List of strings.
+func GetStringListXML(result []xmldot.Result) types.List {
 	v := make([]attr.Value, len(result))
 	for r := range result {
 		v[r] = types.StringValue(result[r].String())
@@ -68,10 +49,22 @@ func GetStringList(result []gjson.Result) types.List {
 	return types.ListValueMust(types.StringType, v)
 }
 
-func GetInt64List(result []gjson.Result) types.List {
+// GetInt64ListXML converts a slice of xmldot.Result to a Terraform types.List of int64.
+func GetInt64ListXML(result []xmldot.Result) types.List {
 	v := make([]attr.Value, len(result))
 	for r := range result {
 		v[r] = types.Int64Value(result[r].Int())
 	}
 	return types.ListValueMust(types.Int64Type, v)
+}
+
+// RemoveEmptyStrings filters out empty strings from a slice.
+func RemoveEmptyStrings(s []string) []string {
+	var r []string
+	for _, v := range s {
+		if v != "" {
+			r = append(r, v)
+		}
+	}
+	return r
 }

@@ -84,9 +84,9 @@ func main() {
 		}
 	}
 
-	// update nso_restconf resource and data source
+	// update nso_netconf resource and data source
 	for _, path := range docPaths {
-		filename := path + "restconf.md"
+		filename := path + "netconf.md"
 		content, err := ioutil.ReadFile(filename)
 		if err != nil {
 			log.Fatalf("Error opening documentation: %v", err)

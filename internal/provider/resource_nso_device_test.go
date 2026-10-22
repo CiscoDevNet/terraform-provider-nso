@@ -38,13 +38,13 @@ func TestAccNsoDevice(t *testing.T) {
 					resource.TestCheckResourceAttr("nso_device.test", "port", "22"),
 					resource.TestCheckResourceAttr("nso_device.test", "authgroup", "default"),
 					resource.TestCheckResourceAttr("nso_device.test", "admin_state", "locked"),
-					resource.TestCheckResourceAttr("nso_device.test", "cli_ned_id", "cisco-ios-cli-3.8:cisco-ios-cli-3.8"),
+					resource.TestCheckResourceAttr("nso_device.test", "cli_ned_id", "cisco-ios-cli-6.115:cisco-ios-cli-6.115"),
 				),
 			},
 			{
 				ResourceName:  "nso_device.test",
 				ImportState:   true,
-				ImportStateId: "tailf-ncs:devices/device=test-device01",
+				ImportStateId: "test-device01",
 			},
 		},
 	})
@@ -66,7 +66,7 @@ func testAccNsoDeviceConfig_all() string {
 		port = 22
 		authgroup = "default"
 		admin_state = "locked"
-		cli_ned_id = "cisco-ios-cli-3.8:cisco-ios-cli-3.8"
+		cli_ned_id = "cisco-ios-cli-6.115:cisco-ios-cli-6.115"
 	}
 	`
 }

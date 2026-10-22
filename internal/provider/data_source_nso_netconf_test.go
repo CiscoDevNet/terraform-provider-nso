@@ -23,32 +23,32 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
-func TestAccDataSourceNsoRestconf(t *testing.T) {
+func TestAccDataSourceNsoNetconf(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceNsoRestconfConfig,
+				Config: testAccDataSourceNsoNetconfConfig,
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("data.nso_restconf.test", "id", "tailf-ncs:ssh"),
-					resource.TestCheckResourceAttr("data.nso_restconf.test", "attributes.host-key-verification", "reject-unknown"),
+					resource.TestCheckResourceAttr("data.nso_netconf.test", "id", "/tailf-ncs:ssh"),
+					resource.TestCheckResourceAttr("data.nso_netconf.test", "attributes.host-key-verification", "reject-unknown"),
 				),
 			},
 		},
 	})
 }
 
-const testAccDataSourceNsoRestconfConfig = `
-resource "nso_restconf" "test" {
-	path = "tailf-ncs:ssh"
+const testAccDataSourceNsoNetconfConfig = `
+resource "nso_netconf" "test" {
+	path = "/tailf-ncs:ssh"
 	attributes = {
 		host-key-verification = "reject-unknown"
 	}
 }
 
-data "nso_restconf" "test" {
-	path = "tailf-ncs:ssh"
-	depends_on = [nso_restconf.test]
+data "nso_netconf" "test" {
+	path = "/tailf-ncs:ssh"
+	depends_on = [nso_netconf.test]
 }
 `

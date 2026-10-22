@@ -22,14 +22,13 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"regexp"
 	"strconv"
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/netascode/go-netconf"
+	"github.com/netascode/xmldot"
 )
 
 type Device struct {
@@ -58,161 +57,209 @@ type DeviceData struct {
 	GenericNedId types.String `tfsdk:"generic_ned_id"`
 }
 
+// getPath returns the XPath of the object, which is also used as the resource id.
 func (data Device) getPath() string {
-	return fmt.Sprintf("tailf-ncs:devices/device=%v", url.QueryEscape(fmt.Sprintf("%v", data.Name.ValueString())))
+	return data.getXPath()
 }
 
 func (data DeviceData) getPath() string {
-	return fmt.Sprintf("tailf-ncs:devices/device=%v", url.QueryEscape(fmt.Sprintf("%v", data.Name.ValueString())))
+	return data.getXPath()
 }
 
-// if last path element has a key -> remove it
-func (data Device) getPathShort() string {
-	path := data.getPath()
-	re := regexp.MustCompile(`(.*)=[^\/]*$`)
-	matches := re.FindStringSubmatch(path)
-	if len(matches) <= 1 {
-		return path
+func (data Device) getXPath() string {
+	path := "/tailf-ncs:devices/device[name='%v']"
+	path = fmt.Sprintf(path, fmt.Sprintf("%v", data.Name.ValueString()))
+	return path
+}
+
+func (data DeviceData) getXPath() string {
+	path := "/tailf-ncs:devices/device[name='%v']"
+	path = fmt.Sprintf(path, fmt.Sprintf("%v", data.Name.ValueString()))
+	return path
+}
+
+func (data Device) toBodyXML(ctx context.Context) string {
+	body := data.addToBodyXML(ctx, netconf.Body{})
+	bodyString, err := body.String()
+	if err != nil {
+		tflog.Error(ctx, fmt.Sprintf("Error converting body to string: %s", err))
 	}
-	return matches[1]
+	return bodyString
 }
 
-func (data Device) toBody(ctx context.Context) string {
-	body := `{"` + helpers.LastElement(data.getPath()) + `":{}}`
+// addToBodyXML adds this object to an existing body instead of starting from an empty one. Bulk
+// resources use this to serialize all of their items into a single NETCONF payload.
+func (data Device) addToBodyXML(ctx context.Context, body netconf.Body) netconf.Body {
 	if !data.Name.IsNull() && !data.Name.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"name", data.Name.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/name", data.Name.ValueString())
 	}
 	if !data.Address.IsNull() && !data.Address.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"address", data.Address.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/address", data.Address.ValueString())
 	}
 	if !data.Port.IsNull() && !data.Port.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"port", strconv.FormatInt(data.Port.ValueInt64(), 10))
+		body = helpers.SetFromXPath(body, data.getXPath()+"/port", strconv.FormatInt(data.Port.ValueInt64(), 10))
 	}
 	if !data.Authgroup.IsNull() && !data.Authgroup.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"authgroup", data.Authgroup.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/authgroup", data.Authgroup.ValueString())
 	}
 	if !data.AdminState.IsNull() && !data.AdminState.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"state.admin-state", data.AdminState.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/state/admin-state", data.AdminState.ValueString())
 	}
 	if !data.NetconfNetId.IsNull() && !data.NetconfNetId.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.netconf.ned-id", data.NetconfNetId.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/device-type/netconf/ned-id", data.NetconfNetId.ValueString())
 	}
 	if !data.CliNedId.IsNull() && !data.CliNedId.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.cli.ned-id", data.CliNedId.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/device-type/cli/ned-id", data.CliNedId.ValueString())
 	}
 	if !data.GenericNedId.IsNull() && !data.GenericNedId.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-type.generic.ned-id", data.GenericNedId.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/device-type/generic/ned-id", data.GenericNedId.ValueString())
 	}
 	return body
 }
 
-func (data *Device) updateFromBody(ctx context.Context, res gjson.Result) {
-	prefix := helpers.LastElement(data.getPath()) + "."
-	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
-		prefix += "0."
-	}
-	if value := res.Get(prefix + "name"); value.Exists() && !data.Name.IsNull() {
+func (data *Device) updateFromBodyXML(ctx context.Context, res xmldot.Result) {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/name"); value.Exists() && !data.Name.IsNull() {
 		data.Name = types.StringValue(value.String())
 	} else {
 		data.Name = types.StringNull()
 	}
-	if value := res.Get(prefix + "address"); value.Exists() && !data.Address.IsNull() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/address"); value.Exists() && !data.Address.IsNull() {
 		data.Address = types.StringValue(value.String())
 	} else {
 		data.Address = types.StringNull()
 	}
-	if value := res.Get(prefix + "port"); value.Exists() && !data.Port.IsNull() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/port"); value.Exists() && !data.Port.IsNull() {
 		data.Port = types.Int64Value(value.Int())
 	} else {
 		data.Port = types.Int64Null()
 	}
-	if value := res.Get(prefix + "authgroup"); value.Exists() && !data.Authgroup.IsNull() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/authgroup"); value.Exists() && !data.Authgroup.IsNull() {
 		data.Authgroup = types.StringValue(value.String())
 	} else {
 		data.Authgroup = types.StringNull()
 	}
-	if value := res.Get(prefix + "state.admin-state"); value.Exists() && !data.AdminState.IsNull() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/state/admin-state"); value.Exists() && !data.AdminState.IsNull() {
 		data.AdminState = types.StringValue(value.String())
 	} else {
 		data.AdminState = types.StringNull()
 	}
-	if value := res.Get(prefix + "device-type.netconf.ned-id"); value.Exists() && !data.NetconfNetId.IsNull() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/netconf/ned-id"); value.Exists() && !data.NetconfNetId.IsNull() {
 		data.NetconfNetId = types.StringValue(value.String())
 	} else {
 		data.NetconfNetId = types.StringNull()
 	}
-	if value := res.Get(prefix + "device-type.cli.ned-id"); value.Exists() && !data.CliNedId.IsNull() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/cli/ned-id"); value.Exists() && !data.CliNedId.IsNull() {
 		data.CliNedId = types.StringValue(value.String())
 	} else {
 		data.CliNedId = types.StringNull()
 	}
-	if value := res.Get(prefix + "device-type.generic.ned-id"); value.Exists() && !data.GenericNedId.IsNull() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/generic/ned-id"); value.Exists() && !data.GenericNedId.IsNull() {
 		data.GenericNedId = types.StringValue(value.String())
 	} else {
 		data.GenericNedId = types.StringNull()
 	}
 }
 
-func (data *DeviceData) fromBody(ctx context.Context, res gjson.Result) {
-	prefix := helpers.LastElement(data.getPath()) + "."
-	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
-		prefix += "0."
-	}
-	if value := res.Get(prefix + "address"); value.Exists() {
+func (data *Device) fromBodyXML(ctx context.Context, res xmldot.Result) {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/address"); value.Exists() {
 		data.Address = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "port"); value.Exists() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/port"); value.Exists() {
 		data.Port = types.Int64Value(value.Int())
 	}
-	if value := res.Get(prefix + "authgroup"); value.Exists() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/authgroup"); value.Exists() {
 		data.Authgroup = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "state.admin-state"); value.Exists() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/state/admin-state"); value.Exists() {
 		data.AdminState = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "device-type.netconf.ned-id"); value.Exists() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/netconf/ned-id"); value.Exists() {
 		data.NetconfNetId = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "device-type.cli.ned-id"); value.Exists() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/cli/ned-id"); value.Exists() {
 		data.CliNedId = types.StringValue(value.String())
 	}
-	if value := res.Get(prefix + "device-type.generic.ned-id"); value.Exists() {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/generic/ned-id"); value.Exists() {
 		data.GenericNedId = types.StringValue(value.String())
 	}
 }
 
-func (data *Device) getDeletedListItems(ctx context.Context, state Device) []string {
-	deletedListItems := make([]string, 0)
-	return deletedListItems
+func (data *DeviceData) fromBodyXML(ctx context.Context, res xmldot.Result) {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/address"); value.Exists() {
+		data.Address = types.StringValue(value.String())
+	}
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/port"); value.Exists() {
+		data.Port = types.Int64Value(value.Int())
+	}
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/authgroup"); value.Exists() {
+		data.Authgroup = types.StringValue(value.String())
+	}
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/state/admin-state"); value.Exists() {
+		data.AdminState = types.StringValue(value.String())
+	}
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/netconf/ned-id"); value.Exists() {
+		data.NetconfNetId = types.StringValue(value.String())
+	}
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/cli/ned-id"); value.Exists() {
+		data.CliNedId = types.StringValue(value.String())
+	}
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-type/generic/ned-id"); value.Exists() {
+		data.GenericNedId = types.StringValue(value.String())
+	}
 }
 
-func (data *Device) getEmptyLeafsDelete(ctx context.Context) []string {
-	emptyLeafsDelete := make([]string, 0)
-	return emptyLeafsDelete
+func (data *Device) addDeletedItemsXML(ctx context.Context, state Device, body string) string {
+	b := netconf.NewBody(body)
+	if !state.GenericNedId.IsNull() && data.GenericNedId.IsNull() {
+		b = helpers.RemoveFromXPath(b, state.getXPath()+"/device-type/generic/ned-id")
+	}
+	if !state.CliNedId.IsNull() && data.CliNedId.IsNull() {
+		b = helpers.RemoveFromXPath(b, state.getXPath()+"/device-type/cli/ned-id")
+	}
+	if !state.NetconfNetId.IsNull() && data.NetconfNetId.IsNull() {
+		b = helpers.RemoveFromXPath(b, state.getXPath()+"/device-type/netconf/ned-id")
+	}
+	if !state.AdminState.IsNull() && data.AdminState.IsNull() {
+		b = helpers.RemoveFromXPath(b, state.getXPath()+"/state/admin-state")
+	}
+	if !state.Authgroup.IsNull() && data.Authgroup.IsNull() {
+		b = helpers.RemoveFromXPath(b, state.getXPath()+"/authgroup")
+	}
+	if !state.Port.IsNull() && data.Port.IsNull() {
+		b = helpers.RemoveFromXPath(b, state.getXPath()+"/port")
+	}
+	if !state.Address.IsNull() && data.Address.IsNull() {
+		b = helpers.RemoveFromXPath(b, state.getXPath()+"/address")
+	}
+
+	b = helpers.CleanupRedundantRemoveOperations(b)
+	return b.Res()
 }
 
-func (data *Device) getDeletePaths(ctx context.Context) []string {
-	var deletePaths []string
-	if !data.Address.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/address", data.getPath()))
-	}
-	if !data.Port.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/port", data.getPath()))
-	}
-	if !data.Authgroup.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/authgroup", data.getPath()))
-	}
-	if !data.AdminState.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/state/admin-state", data.getPath()))
-	}
-	if !data.NetconfNetId.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-type/netconf/ned-id", data.getPath()))
+func (data *Device) addDeletePathsXML(ctx context.Context, body string) string {
+	b := netconf.NewBody(body)
+	if !data.GenericNedId.IsNull() {
+		b = helpers.RemoveFromXPath(b, data.getXPath()+"/device-type/generic/ned-id")
 	}
 	if !data.CliNedId.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-type/cli/ned-id", data.getPath()))
+		b = helpers.RemoveFromXPath(b, data.getXPath()+"/device-type/cli/ned-id")
 	}
-	if !data.GenericNedId.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-type/generic/ned-id", data.getPath()))
+	if !data.NetconfNetId.IsNull() {
+		b = helpers.RemoveFromXPath(b, data.getXPath()+"/device-type/netconf/ned-id")
 	}
-	return deletePaths
+	if !data.AdminState.IsNull() {
+		b = helpers.RemoveFromXPath(b, data.getXPath()+"/state/admin-state")
+	}
+	if !data.Authgroup.IsNull() {
+		b = helpers.RemoveFromXPath(b, data.getXPath()+"/authgroup")
+	}
+	if !data.Port.IsNull() {
+		b = helpers.RemoveFromXPath(b, data.getXPath()+"/port")
+	}
+	if !data.Address.IsNull() {
+		b = helpers.RemoveFromXPath(b, data.getXPath()+"/address")
+	}
+
+	b = helpers.CleanupRedundantRemoveOperations(b)
+	return b.Res()
 }

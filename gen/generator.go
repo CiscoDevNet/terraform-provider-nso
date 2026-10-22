@@ -189,14 +189,6 @@ func ToGoName(s string) string {
 	return s
 }
 
-// Templating helper function to convert YANG name to GO name
-func ToJsonPath(yangPath, xPath string) string {
-	if xPath != "" {
-		return strings.ReplaceAll(xPath, "/", ".")
-	}
-	return strings.ReplaceAll(yangPath, "/", ".")
-}
-
 // Templating helper function to convert string to camel case
 func CamelCase(s string) string {
 	var g []string
@@ -231,15 +223,31 @@ func HasId(attributes []YamlConfigAttribute) bool {
 	return false
 }
 
-// Templating helper function to get example dn
-func GetExamplePath(path string, attributes []YamlConfigAttribute) string {
-	a := make([]interface{}, 0, len(attributes))
-	for _, attr := range attributes {
-		if attr.Id || attr.Reference {
-			a = append(a, attr.Example)
+// Templating helper function to add two integers
+func Add(a, b int) int {
+	return a + b
+}
+
+// Templating helper function to return the attributes that make up the import identifier
+func ImportAttributes(config YamlConfig) []YamlConfigAttribute {
+	attributes := []YamlConfigAttribute{}
+	for _, attr := range config.Attributes {
+		if attr.Reference || attr.Id {
+			attributes = append(attributes, attr)
 		}
 	}
-	return fmt.Sprintf(path, a...)
+	return attributes
+}
+
+// Templating helper function to get the example import identifier
+func GetImportId(attributes []YamlConfigAttribute) string {
+	ids := []string{}
+	for _, attr := range attributes {
+		if attr.Id || attr.Reference {
+			ids = append(ids, attr.Example)
+		}
+	}
+	return strings.Join(ids, ",")
 }
 
 // Templating helper function to identify last element of list
@@ -252,12 +260,32 @@ func RemoveLastPathElement(p string) string {
 	return path.Dir(p)
 }
 
-// Templating helper function to get xpath if available
-func GetXPath(yangPath, xPath string) string {
-	if xPath != "" {
-		return xPath
+// Templating helper function to get the path to delete for an attribute
+func GetDeletePath(attribute YamlConfigAttribute) string {
+	if attribute.DeleteParent {
+		return RemoveLastPathElement(attribute.XPath)
 	}
-	return yangPath
+	return attribute.XPath
+}
+
+// Templating helper function to reverse the order of attributes
+func ReverseAttributes(attributes []YamlConfigAttribute) []YamlConfigAttribute {
+	reversed := make([]YamlConfigAttribute, len(attributes))
+	for i, v := range attributes {
+		reversed[len(attributes)-1-i] = v
+	}
+	return reversed
+}
+
+// Templating helper function to return attributes with an XPath
+func XPathAttributes(attributes []YamlConfigAttribute) []YamlConfigAttribute {
+	var filtered []YamlConfigAttribute
+	for _, attr := range attributes {
+		if attr.XPath != "" {
+			filtered = append(filtered, attr)
+		}
+	}
+	return filtered
 }
 
 func contains(s []string, str string) bool {
@@ -272,15 +300,18 @@ func contains(s []string, str string) bool {
 // Map of templating functions
 var functions = template.FuncMap{
 	"toGoName":              ToGoName,
-	"toJsonPath":            ToJsonPath,
 	"camelCase":             CamelCase,
 	"snakeCase":             SnakeCase,
 	"hasId":                 HasId,
-	"getExamplePath":        GetExamplePath,
 	"isLast":                IsLast,
 	"sprintf":               fmt.Sprintf,
 	"removeLastPathElement": RemoveLastPathElement,
-	"getXPath":              GetXPath,
+	"getDeletePath":         GetDeletePath,
+	"reverseAttributes":     ReverseAttributes,
+	"xpathAttributes":       XPathAttributes,
+	"add":                   Add,
+	"importAttributes":      ImportAttributes,
+	"getImportId":           GetImportId,
 }
 
 func resolvePath(e *yang.Entry, path string) *yang.Entry {
@@ -288,9 +319,9 @@ func resolvePath(e *yang.Entry, path string) *yang.Entry {
 
 	for _, pathElement := range pathElements {
 		if len(pathElement) > 0 {
-			// remove key
-			if strings.Contains(pathElement, "=") {
-				pathElement = pathElement[:strings.Index(pathElement, "=")]
+			// remove key predicate
+			if strings.Contains(pathElement, "[") {
+				pathElement = pathElement[:strings.Index(pathElement, "[")]
 			}
 			// remove reference
 			if strings.Contains(pathElement, ":") {
@@ -435,6 +466,7 @@ func augmentConfig(config *YamlConfig, modelPaths []string) {
 		path = config.Path
 	}
 
+	path = strings.TrimPrefix(path, "/")
 	module := strings.Split(path, ":")[0]
 	e, errors := yang.GetModule(module, modelPaths...)
 	if len(errors) > 0 {

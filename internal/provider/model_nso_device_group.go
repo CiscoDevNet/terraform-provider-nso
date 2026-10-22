@@ -22,13 +22,12 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"regexp"
 
 	"github.com/CiscoDevNet/terraform-provider-nso/internal/provider/helpers"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/netascode/go-netconf"
+	"github.com/netascode/xmldot"
 )
 
 type DeviceGroup struct {
@@ -47,99 +46,177 @@ type DeviceGroupData struct {
 	DeviceGroups types.List   `tfsdk:"device_groups"`
 }
 
+// getPath returns the XPath of the object, which is also used as the resource id.
 func (data DeviceGroup) getPath() string {
-	return fmt.Sprintf("tailf-ncs:devices/device-group=%v", url.QueryEscape(fmt.Sprintf("%v", data.Name.ValueString())))
+	return data.getXPath()
 }
 
 func (data DeviceGroupData) getPath() string {
-	return fmt.Sprintf("tailf-ncs:devices/device-group=%v", url.QueryEscape(fmt.Sprintf("%v", data.Name.ValueString())))
+	return data.getXPath()
 }
 
-// if last path element has a key -> remove it
-func (data DeviceGroup) getPathShort() string {
-	path := data.getPath()
-	re := regexp.MustCompile(`(.*)=[^\/]*$`)
-	matches := re.FindStringSubmatch(path)
-	if len(matches) <= 1 {
-		return path
+func (data DeviceGroup) getXPath() string {
+	path := "/tailf-ncs:devices/device-group[name='%v']"
+	path = fmt.Sprintf(path, fmt.Sprintf("%v", data.Name.ValueString()))
+	return path
+}
+
+func (data DeviceGroupData) getXPath() string {
+	path := "/tailf-ncs:devices/device-group[name='%v']"
+	path = fmt.Sprintf(path, fmt.Sprintf("%v", data.Name.ValueString()))
+	return path
+}
+
+func (data DeviceGroup) toBodyXML(ctx context.Context) string {
+	body := data.addToBodyXML(ctx, netconf.Body{})
+	bodyString, err := body.String()
+	if err != nil {
+		tflog.Error(ctx, fmt.Sprintf("Error converting body to string: %s", err))
 	}
-	return matches[1]
+	return bodyString
 }
 
-func (data DeviceGroup) toBody(ctx context.Context) string {
-	body := `{"` + helpers.LastElement(data.getPath()) + `":{}}`
+// addToBodyXML adds this object to an existing body instead of starting from an empty one. Bulk
+// resources use this to serialize all of their items into a single NETCONF payload.
+func (data DeviceGroup) addToBodyXML(ctx context.Context, body netconf.Body) netconf.Body {
 	if !data.Name.IsNull() && !data.Name.IsUnknown() {
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"name", data.Name.ValueString())
+		body = helpers.SetFromXPath(body, data.getXPath()+"/name", data.Name.ValueString())
 	}
 	if !data.DeviceNames.IsNull() && !data.DeviceNames.IsUnknown() {
 		var values []string
 		data.DeviceNames.ElementsAs(ctx, &values, false)
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-name", values)
+		for _, v := range values {
+			body = helpers.AppendFromXPath(body, data.getXPath()+"/device-name", v)
+		}
 	}
 	if !data.DeviceGroups.IsNull() && !data.DeviceGroups.IsUnknown() {
 		var values []string
 		data.DeviceGroups.ElementsAs(ctx, &values, false)
-		body, _ = sjson.Set(body, helpers.LastElement(data.getPath())+"."+"device-group", values)
+		for _, v := range values {
+			body = helpers.AppendFromXPath(body, data.getXPath()+"/device-group", v)
+		}
 	}
 	return body
 }
 
-func (data *DeviceGroup) updateFromBody(ctx context.Context, res gjson.Result) {
-	prefix := helpers.LastElement(data.getPath()) + "."
-	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
-		prefix += "0."
-	}
-	if value := res.Get(prefix + "name"); value.Exists() && !data.Name.IsNull() {
+func (data *DeviceGroup) updateFromBodyXML(ctx context.Context, res xmldot.Result) {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/name"); value.Exists() && !data.Name.IsNull() {
 		data.Name = types.StringValue(value.String())
 	} else {
 		data.Name = types.StringNull()
 	}
-	if value := res.Get(prefix + "device-name"); value.Exists() && !data.DeviceNames.IsNull() {
-		data.DeviceNames = helpers.GetStringList(value.Array())
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-name"); value.Exists() && !data.DeviceNames.IsNull() {
+		data.DeviceNames = helpers.GetStringListXML(value.Array())
 	} else {
 		data.DeviceNames = types.ListNull(types.StringType)
 	}
-	if value := res.Get(prefix + "device-group"); value.Exists() && !data.DeviceGroups.IsNull() {
-		data.DeviceGroups = helpers.GetStringList(value.Array())
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-group"); value.Exists() && !data.DeviceGroups.IsNull() {
+		data.DeviceGroups = helpers.GetStringListXML(value.Array())
 	} else {
 		data.DeviceGroups = types.ListNull(types.StringType)
 	}
 }
 
-func (data *DeviceGroupData) fromBody(ctx context.Context, res gjson.Result) {
-	prefix := helpers.LastElement(data.getPath()) + "."
-	if res.Get(helpers.LastElement(data.getPath())).IsArray() {
-		prefix += "0."
-	}
-	if value := res.Get(prefix + "device-name"); value.Exists() {
-		data.DeviceNames = helpers.GetStringList(value.Array())
+func (data *DeviceGroup) fromBodyXML(ctx context.Context, res xmldot.Result) {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-name"); value.Exists() {
+		data.DeviceNames = helpers.GetStringListXML(value.Array())
 	} else {
 		data.DeviceNames = types.ListNull(types.StringType)
 	}
-	if value := res.Get(prefix + "device-group"); value.Exists() {
-		data.DeviceGroups = helpers.GetStringList(value.Array())
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-group"); value.Exists() {
+		data.DeviceGroups = helpers.GetStringListXML(value.Array())
 	} else {
 		data.DeviceGroups = types.ListNull(types.StringType)
 	}
 }
 
-func (data *DeviceGroup) getDeletedListItems(ctx context.Context, state DeviceGroup) []string {
-	deletedListItems := make([]string, 0)
-	return deletedListItems
-}
-
-func (data *DeviceGroup) getEmptyLeafsDelete(ctx context.Context) []string {
-	emptyLeafsDelete := make([]string, 0)
-	return emptyLeafsDelete
-}
-
-func (data *DeviceGroup) getDeletePaths(ctx context.Context) []string {
-	var deletePaths []string
-	if !data.DeviceNames.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-name", data.getPath()))
+func (data *DeviceGroupData) fromBodyXML(ctx context.Context, res xmldot.Result) {
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-name"); value.Exists() {
+		data.DeviceNames = helpers.GetStringListXML(value.Array())
+	} else {
+		data.DeviceNames = types.ListNull(types.StringType)
 	}
+	if value := helpers.GetFromXPath(res, "data"+data.getXPath()+"/device-group"); value.Exists() {
+		data.DeviceGroups = helpers.GetStringListXML(value.Array())
+	} else {
+		data.DeviceGroups = types.ListNull(types.StringType)
+	}
+}
+
+func (data *DeviceGroup) addDeletedItemsXML(ctx context.Context, state DeviceGroup, body string) string {
+	b := netconf.NewBody(body)
+	if !state.DeviceGroups.IsNull() {
+		if data.DeviceGroups.IsNull() {
+			var values []string
+			state.DeviceGroups.ElementsAs(ctx, &values, false)
+			for _, v := range values {
+				b = helpers.RemoveFromXPath(b, fmt.Sprintf(state.getXPath()+"/device-group[.=%v]", v))
+			}
+		} else {
+			var dataValues, stateValues []string
+			data.DeviceGroups.ElementsAs(ctx, &dataValues, false)
+			state.DeviceGroups.ElementsAs(ctx, &stateValues, false)
+			for _, v := range stateValues {
+				found := false
+				for _, vv := range dataValues {
+					if v == vv {
+						found = true
+						break
+					}
+				}
+				if !found {
+					b = helpers.RemoveFromXPath(b, fmt.Sprintf(state.getXPath()+"/device-group[.=%v]", v))
+				}
+			}
+		}
+	}
+	if !state.DeviceNames.IsNull() {
+		if data.DeviceNames.IsNull() {
+			var values []string
+			state.DeviceNames.ElementsAs(ctx, &values, false)
+			for _, v := range values {
+				b = helpers.RemoveFromXPath(b, fmt.Sprintf(state.getXPath()+"/device-name[.=%v]", v))
+			}
+		} else {
+			var dataValues, stateValues []string
+			data.DeviceNames.ElementsAs(ctx, &dataValues, false)
+			state.DeviceNames.ElementsAs(ctx, &stateValues, false)
+			for _, v := range stateValues {
+				found := false
+				for _, vv := range dataValues {
+					if v == vv {
+						found = true
+						break
+					}
+				}
+				if !found {
+					b = helpers.RemoveFromXPath(b, fmt.Sprintf(state.getXPath()+"/device-name[.=%v]", v))
+				}
+			}
+		}
+	}
+
+	b = helpers.CleanupRedundantRemoveOperations(b)
+	return b.Res()
+}
+
+func (data *DeviceGroup) addDeletePathsXML(ctx context.Context, body string) string {
+	b := netconf.NewBody(body)
 	if !data.DeviceGroups.IsNull() {
-		deletePaths = append(deletePaths, fmt.Sprintf("%v/device-group", data.getPath()))
+		var values []string
+		data.DeviceGroups.ElementsAs(ctx, &values, false)
+		for _, v := range values {
+			b = helpers.RemoveFromXPath(b, fmt.Sprintf(data.getXPath()+"/device-group[.=%v]", v))
+		}
 	}
-	return deletePaths
+	if !data.DeviceNames.IsNull() {
+		var values []string
+		data.DeviceNames.ElementsAs(ctx, &values, false)
+		for _, v := range values {
+			b = helpers.RemoveFromXPath(b, fmt.Sprintf(data.getXPath()+"/device-name[.=%v]", v))
+		}
+	}
+
+	b = helpers.CleanupRedundantRemoveOperations(b)
+	return b.Res()
 }

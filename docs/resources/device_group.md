@@ -15,7 +15,7 @@ This resource can manage the Device Group configuration.
 ```terraform
 resource "nso_device_group" "example" {
   name         = "test-group1"
-  device_names = ["ce0"]
+  device_names = ["tf-acc-dg-device"]
 }
 ```
 
@@ -34,7 +34,7 @@ resource "nso_device_group" "example" {
 
 ### Read-Only
 
-- `id` (String) The RESTCONF path.
+- `id` (String) The XPath of the object.
 
 ## Import
 
@@ -43,5 +43,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import nso_device_group.example "tailf-ncs:devices/device-group=test-group1"
+terraform import nso_device_group.example "test-group1"
 ```

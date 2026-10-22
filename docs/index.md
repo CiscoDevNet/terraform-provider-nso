@@ -12,7 +12,9 @@ The following example repositories exist to demonstrate the use of the provider:
 
 - [MPLS VPN Service Example](https://github.com/netascode/terraform-nso-service-example)
 
-It communicates with NSO instances via RESTCONF, which requires the RESTCONF API to be enabled in `ncs.conf`.
+It communicates with NSO instances via NETCONF, which requires the northbound NETCONF interface to be enabled in `ncs.conf` (it listens on port `2022` by default).
+
+Configuration changes are written to the candidate datastore and committed if NSO exposes one; otherwise they are written to the running datastore directly. Objects are addressed by XPath, for example `/tailf-ncs:devices/device[name='c1']`. Elements of NED or service modules use the YANG module name as prefix, for example `tailf-ned-cisco-ios:hostname`; the corresponding XML namespaces are discovered from the NETCONF capabilities advertised by NSO.
 
 ## Example Usage
 
@@ -20,7 +22,7 @@ It communicates with NSO instances via RESTCONF, which requires the RESTCONF API
 provider "nso" {
   username = "admin"
   password = "admin"
-  url      = "http://localhost:8080"
+  host     = "nso.example.com:2022"
 }
 ```
 
@@ -29,11 +31,16 @@ provider "nso" {
 
 ### Optional
 
-- `insecure` (Boolean) Allow insecure HTTPS client. This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.
+- `attempt_timeout` (Number) Timeout in seconds for a single NETCONF operation attempt. This can also be set as the NSO_ATTEMPT_TIMEOUT environment variable. Defaults to `30`.
+- `auto_commit` (Boolean) Automatically commit the candidate datastore after each resource operation. Only applies when the NSO NETCONF northbound interface exposes the candidate datastore; otherwise changes are written to the running datastore directly. **Requires reuse_connection=true when disabled**. This can also be set as the NSO_AUTO_COMMIT environment variable. Defaults to `true`.
+- `host` (String) Hostname or IP address of the Cisco NSO NETCONF interface. Optionally a port can be added with `:12345`. The default port is `2022`. This can also be set as the NSO_HOST environment variable.
+- `insecure` (Boolean) Skip SSH host key verification. This can also be set as the NSO_INSECURE environment variable. Defaults to `true`.
 - `instances` (Attributes List) This can be used to manage a list of instances from a single provider. All instances must use the same credentials. Each resource and data source has an optional attribute named `instance`, which can then select an instance by its name from this list. (see [below for nested schema](#nestedatt--instances))
+- `lock_release_timeout` (Number) Timeout in seconds to wait for a NETCONF datastore lock to be released. This can also be set as the NSO_LOCK_RELEASE_TIMEOUT environment variable. Defaults to `120`.
 - `password` (String, Sensitive) Password for the NSO instance. This can also be set as the NSO_PASSWORD environment variable.
-- `retries` (Number) Number of retries for RESTCONF API calls. This can also be set as the NSO_RETRIES environment variable. Defaults to `1`.
-- `url` (String) URL of the Cisco NSO instance. Optionally a port can be added with `:12345`. The default port is `443`. This can also be set as the NSO_URL environment variable.
+- `retries` (Number) Number of retries for NETCONF operations. This can also be set as the NSO_RETRIES environment variable. Defaults to `3`.
+- `reuse_connection` (Boolean) Keep NETCONF sessions open for reuse across operations. **Required when auto_commit=false**. This can also be set as the NSO_REUSE_CONNECTION environment variable. Defaults to `true`.
+- `total_timeout` (Number) Total timeout in seconds across all NETCONF retries. This can also be set as the NSO_TOTAL_TIMEOUT environment variable. Defaults to `120`.
 - `username` (String) Username for the NSO instance. This can also be set as the NSO_USERNAME environment variable.
 
 <a id="nestedatt--instances"></a>
@@ -41,5 +48,5 @@ provider "nso" {
 
 Required:
 
+- `host` (String) Hostname or IP address of the Cisco NSO NETCONF interface. Optionally a port can be added with `:12345`. The default port is `2022`.
 - `name` (String) Instance name.
-- `url` (String) URL of the Cisco NSO instance.
