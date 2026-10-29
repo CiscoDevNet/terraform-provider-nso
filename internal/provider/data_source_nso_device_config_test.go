@@ -18,37 +18,43 @@
 package provider
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccDataSourceNsoDeviceConfig(t *testing.T) {
+	device := testAccDevice
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceNsoDeviceConfigConfig,
+				Config: testAccDataSourceNsoDeviceConfigConfig(),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("data.nso_device_config.test", "id", "tailf-ncs:devices/device=ce0/config"),
-					resource.TestCheckResourceAttr("data.nso_device_config.test", "attributes.tailf-ned-cisco-ios:hostname", "R1"),
+					resource.TestCheckResourceAttr("data.nso_device_config.test", "id", fmt.Sprintf("/tailf-ncs:devices/device[name='%s']/config/%s", device, testAccLoopbackPath)),
+					resource.TestCheckResourceAttr("data.nso_device_config.test", "attributes.description", "tf-acc-ds"),
 				),
 			},
 		},
 	})
 }
 
-const testAccDataSourceNsoDeviceConfigConfig = `
-resource "nso_device_config" "test" {
-	device = "ce0"
-	attributes = {
-		"tailf-ned-cisco-ios:hostname" = "R1"
+func testAccDataSourceNsoDeviceConfigConfig() string {
+	return testAccDeviceConfig() + fmt.Sprintf(`
+	resource "nso_device_config" "test" {
+		device = nso_device.tf_acc.name
+		path   = "%[1]s"
+		attributes = {
+			description = "tf-acc-ds"
+		}
 	}
-}
 
-data "nso_device_config" "test" {
-	device = "ce0"
-	depends_on = [nso_device_config.test]
+	data "nso_device_config" "test" {
+		device     = nso_device.tf_acc.name
+		path       = "%[1]s"
+		depends_on = [nso_device_config.test]
+	}
+	`, testAccLoopbackPath)
 }
-`

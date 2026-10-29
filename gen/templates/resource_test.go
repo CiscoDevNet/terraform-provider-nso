@@ -64,7 +64,7 @@ func TestAccNso{{camelCase .Name}}(t *testing.T) {
 			{
 				ResourceName:  "nso_{{snakeCase $name}}.test",
 				ImportState:   true,
-				ImportStateId: "{{getExamplePath .Path .Attributes}}",
+				ImportStateId: "{{getImportId .Attributes}}",
 			},
 		},
 	})
@@ -73,7 +73,7 @@ func TestAccNso{{camelCase .Name}}(t *testing.T) {
 {{- if .TestPrerequisites}}
 const testAccNso{{camelCase .Name}}PrerequisitesConfig = `
 {{- range $index, $item := .TestPrerequisites}}
-resource "nso_restconf" "PreReq{{$index}}" {
+resource "nso_netconf" "PreReq{{$index}}" {
 	path = "{{.Path}}"
 	{{- if .NoDelete}}
 	delete = false
@@ -103,7 +103,7 @@ resource "nso_restconf" "PreReq{{$index}}" {
 	]
 	{{- end}}
 	{{- if .Dependencies}}
-	depends_on = [{{range .Dependencies}}nso_restconf.PreReq{{.}}, {{end}}]
+	depends_on = [{{range .Dependencies}}nso_netconf.PreReq{{.}}, {{end}}]
 	{{- end}}
 }
 {{ end}}
@@ -139,7 +139,7 @@ func testAccNso{{camelCase .Name}}Config_minimum() string {
 	{{- end}}
 	{{- end}}
 	{{- if .TestPrerequisites}}
-		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_restconf.PreReq{{$index}}, {{end}}]
+		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_netconf.PreReq{{$index}}, {{end}}]
 	{{- end}}
 	}
 	`
@@ -177,7 +177,7 @@ func testAccNso{{camelCase .Name}}Config_all() string {
 	{{- end}}
 	{{- end}}
 	{{- if .TestPrerequisites}}
-		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_restconf.PreReq{{$index}}, {{end}}]
+		depends_on = [{{range $index, $item := .TestPrerequisites}}nso_netconf.PreReq{{$index}}, {{end}}]
 	{{- end}}
 	}
 	`

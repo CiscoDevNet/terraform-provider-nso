@@ -1,6 +1,6 @@
 ---
 name: Device
-path: tailf-ncs:devices/device=%v
+path: /tailf-ncs:devices/device[name='%v']
 res_description: This resource can manage the Device configuration.
 ds_description: This data source can read the Device configuration.
 no_augment_config: true
@@ -8,6 +8,7 @@ no_delete_attributes: true
 doc_category: Device
 attributes:
   - yang_name: name
+    xpath: name
     tf_name: name
     id: true
     type: String
@@ -28,11 +29,13 @@ attributes:
     max_int: 65535
     example: 22
   - yang_name: authgroup
+    xpath: authgroup
     tf_name: authgroup
     type: String
     description: The authentication credentials used when connecting to this managed device.
     example: default
   - yang_name: state/admin-state
+    xpath: state/admin-state
     tf_name: admin_state
     type: String
     description: Administrative state.
@@ -55,7 +58,7 @@ attributes:
     tf_name: cli_ned_id
     type: String
     description: CLI NED ID.
-    example: cisco-ios-cli-3.8:cisco-ios-cli-3.8
+    example: cisco-ios-cli-6.115:cisco-ios-cli-6.115
   - yang_name: device-type/ne-type/generic/generic/ned-id
     xpath: device-type/generic/ned-id
     tf_name: generic_ned_id

@@ -19,89 +19,107 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
+// The nso_device_config tests create their own southbound-locked device, so
+// changes are only written to the NSO CDB and never pushed to a real device.
+// NSO_TEST_CLI_NED_ID selects the Cisco IOS CLI NED to use for that device.
+const testAccDevice = "tf-acc-ce0"
+
+func testAccDeviceConfig() string {
+	nedId := os.Getenv("NSO_TEST_CLI_NED_ID")
+	if nedId == "" {
+		nedId = "cisco-ios-cli-6.115:cisco-ios-cli-6.115"
+	}
+	return fmt.Sprintf(`
+	resource "nso_device" "tf_acc" {
+		name        = "%s"
+		address     = "192.0.2.1"
+		authgroup   = "default"
+		admin_state = "southbound-locked"
+		cli_ned_id  = "%s"
+	}
+	`, testAccDevice, nedId)
+}
+
+const testAccLoopbackPath = "tailf-ned-cisco-ios:interface/Loopback[name='4091']"
+
 func TestAccNsoDeviceConfig(t *testing.T) {
+	device := testAccDevice
+	xpath := fmt.Sprintf("/tailf-ncs:devices/device[name='%s']/config/%s", device, testAccLoopbackPath)
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccNsoDeviceConfigConfig_empty(),
+				Config: testAccNsoDeviceConfigConfig_loopback("tf-acc-1"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("nso_device_config.test", "id", "tailf-ncs:devices/device=ce0/config"),
+					resource.TestCheckResourceAttr("nso_device_config.test", "id", xpath),
+					resource.TestCheckResourceAttr("nso_device_config.test", "attributes.description", "tf-acc-1"),
 				),
 			},
 			{
-				Config: testAccNsoDeviceConfigConfig_hostname("R1"),
+				ResourceName:            "nso_device_config.test",
+				ImportState:             true,
+				ImportStateId:           device + "," + testAccLoopbackPath,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"attributes"},
+			},
+			{
+				Config: testAccNsoDeviceConfigConfig_loopback("tf-acc-2"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("nso_device_config.test", "id", "tailf-ncs:devices/device=ce0/config"),
-					resource.TestCheckResourceAttr("nso_device_config.test", "attributes.tailf-ned-cisco-ios:hostname", "R1"),
+					resource.TestCheckResourceAttr("nso_device_config.test", "attributes.description", "tf-acc-2"),
 				),
 			},
 			{
-				ResourceName:  "nso_device_config.test",
-				ImportState:   true,
-				ImportStateId: "tailf-ncs:devices/device=ce0/config",
-			},
-			{
-				Config: testAccNsoDeviceConfigConfig_hostname("R2"),
+				Config: testAccNsoDeviceConfigConfig_list([]string{"permit 10.0.0.0 0.0.0.255", "deny any"}),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("nso_device_config.test", "attributes.tailf-ned-cisco-ios:hostname", "R2"),
+					resource.TestCheckResourceAttr("nso_device_config.list", "lists.0.items.#", "2"),
+					resource.TestCheckResourceAttr("nso_device_config.list", "lists.0.items.1.rule", "deny any"),
 				),
 			},
 			{
-				Config: testAccNsoDeviceConfigConfig_nested(),
+				Config: testAccNsoDeviceConfigConfig_list([]string{"permit 10.0.0.0 0.0.0.255"}),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.name", "std-access-list-rule"),
-					resource.TestCheckResourceAttr("nso_device_config.nested", "lists.0.items.0.rule", "permit ip any"),
+					resource.TestCheckResourceAttr("nso_device_config.list", "lists.0.items.#", "1"),
 				),
 			},
 		},
 	})
 }
 
-func testAccNsoDeviceConfigConfig_empty() string {
-	return `
+func testAccNsoDeviceConfigConfig_loopback(description string) string {
+	return testAccDeviceConfig() + fmt.Sprintf(`
 	resource "nso_device_config" "test" {
-		device = "ce0"
-	}
-	`
-}
-
-func testAccNsoDeviceConfigConfig_hostname(hostname string) string {
-	return fmt.Sprintf(`
-	resource "nso_device_config" "test" {
-		device = "ce0"
+		device = nso_device.tf_acc.name
+		path   = "%s"
 		attributes = {
-			"tailf-ned-cisco-ios:hostname" = "%s"
+			description = "%s"
 		}
 	}
-	`, hostname)
+	`, testAccLoopbackPath, description)
 }
 
-func testAccNsoDeviceConfigConfig_nested() string {
-	return `
-	resource "nso_device_config" "nested" {
-		device = "ce0"
-		path = "tailf-ned-cisco-ios:access-list/access-list-standard-range=1"
-		attributes = {
-			listnumber = 1
-		}
+func testAccNsoDeviceConfigConfig_list(rules []string) string {
+	items := ""
+	for _, r := range rules {
+		items += fmt.Sprintf(`{ rule = "%s" },`, r)
+	}
+	return testAccDeviceConfig() + fmt.Sprintf(`
+	resource "nso_device_config" "list" {
+		device = nso_device.tf_acc.name
+		path   = "tailf-ned-cisco-ios:ip/access-list/standard/std-named-acl[name='TF-ACC-TEST']"
 		lists = [
 			{
-				name = "std-access-list-rule"
-				key = "rule"
-				items = [
-					{
-						rule = "permit ip any"
-					}
-				]
+				name  = "std-access-list-rule"
+				key   = "rule"
+				items = [%s]
 			}
 		]
 	}
-	`
+	`, items)
 }

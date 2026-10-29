@@ -31,25 +31,44 @@ func TestAccNsoDeviceGroup(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccNsoDeviceGroupConfig_all(),
+				Config: testAccNsoDeviceGroupPrerequisitesConfig + testAccNsoDeviceGroupConfig_all(),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("nso_device_group.test", "name", "test-group1"),
-					resource.TestCheckResourceAttr("nso_device_group.test", "device_names.0", "ce0"),
+					resource.TestCheckResourceAttr("nso_device_group.test", "device_names.0", "tf-acc-dg-device"),
+					resource.TestCheckResourceAttr("nso_device_group.test", "location_name", "Building-1"),
+					resource.TestCheckResourceAttr("nso_device_group.test", "location_latitude", "37.338207"),
+					resource.TestCheckResourceAttr("nso_device_group.test", "location_longitude", "-121.88633"),
+					resource.TestCheckResourceAttr("nso_device_group.test", "location_altitude", "50"),
 				),
 			},
 			{
 				ResourceName:  "nso_device_group.test",
 				ImportState:   true,
-				ImportStateId: "tailf-ncs:devices/device-group=test-group1",
+				ImportStateId: "test-group1",
 			},
 		},
 	})
 }
 
+const testAccNsoDeviceGroupPrerequisitesConfig = `
+resource "nso_netconf" "PreReq0" {
+	path = "/tailf-ncs:devices/device[name='tf-acc-dg-device']"
+	attributes = {
+		"name" = "tf-acc-dg-device"
+		"address" = "192.0.2.1"
+		"authgroup" = "default"
+		"state/admin-state" = "southbound-locked"
+		"device-type/cli/ned-id" = "cisco-ios-cli-6.115:cisco-ios-cli-6.115"
+	}
+}
+
+`
+
 func testAccNsoDeviceGroupConfig_minimum() string {
 	return `
 	resource "nso_device_group" "test" {
 		name = "test-group1"
+		depends_on = [nso_netconf.PreReq0, ]
 	}
 	`
 }
@@ -58,7 +77,12 @@ func testAccNsoDeviceGroupConfig_all() string {
 	return `
 	resource "nso_device_group" "test" {
 		name = "test-group1"
-		device_names = ["ce0"]
+		device_names = ["tf-acc-dg-device"]
+		location_name = "Building-1"
+		location_latitude = "37.338207"
+		location_longitude = "-121.88633"
+		location_altitude = 50
+		depends_on = [nso_netconf.PreReq0, ]
 	}
 	`
 }

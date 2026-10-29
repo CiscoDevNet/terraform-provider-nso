@@ -37,7 +37,7 @@ func TestAccDataSourceNsoDevice(t *testing.T) {
 					resource.TestCheckResourceAttr("data.nso_device.test", "port", "22"),
 					resource.TestCheckResourceAttr("data.nso_device.test", "authgroup", "default"),
 					resource.TestCheckResourceAttr("data.nso_device.test", "admin_state", "locked"),
-					resource.TestCheckResourceAttr("data.nso_device.test", "cli_ned_id", "cisco-ios-cli-3.8:cisco-ios-cli-3.8"),
+					resource.TestCheckResourceAttr("data.nso_device.test", "cli_ned_id", "cisco-ios-cli-6.115:cisco-ios-cli-6.115"),
 				),
 			},
 		},
@@ -52,7 +52,7 @@ resource "nso_device" "test" {
 	port = 22
 	authgroup = "default"
 	admin_state = "locked"
-	cli_ned_id = "cisco-ios-cli-3.8:cisco-ios-cli-3.8"
+	cli_ned_id = "cisco-ios-cli-6.115:cisco-ios-cli-6.115"
 }
 
 data "nso_device" "test" {

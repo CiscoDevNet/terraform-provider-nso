@@ -14,14 +14,14 @@ provider "nso" {
   alias    = "NSO-DEV"
   username = "user1"
   password = "Cisco123"
-  url      = "https://10.1.1.1"
+  host     = "10.1.1.1:2022"
 }
 
 provider "nso" {
   alias    = "NSO-PROD"
   username = "user1"
   password = "Cisco123"
-  url      = "https://10.1.1.2"
+  host     = "10.1.1.2:2022"
 }
 ```
 
@@ -34,11 +34,11 @@ locals {
   instances = [
     {
       name = "NSO-DEV"
-      url  = "https://10.1.1.1"
+      host = "10.1.1.1:2022"
     },
     {
       name = "NSO-PROD"
-      url  = "https://10.1.1.2"
+      host = "10.1.1.2:2022"
     },
   ]
 }
@@ -50,7 +50,7 @@ provider "nso" {
 }
 
 resource "nso_device" "example" {
-  for_each   = toset([for inst in local.instances : instance.name])
+  for_each   = toset([for inst in local.instances : inst.name])
   instance     = each.key
   name        = "test-device01"
   address     = "10.1.1.1"

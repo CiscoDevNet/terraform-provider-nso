@@ -1,7 +1,7 @@
 # Simple example
 
-resource "nso_restconf" "ssh" {
-  path = "tailf-ncs:ssh"
+resource "nso_netconf" "ssh" {
+  path = "/tailf-ncs:ssh"
   attributes = {
     host-key-verification = "reject-unknown"
   }
@@ -9,8 +9,8 @@ resource "nso_restconf" "ssh" {
 
 # Define YANG lists and its elements
 
-resource "nso_restconf" "customer" {
-  path = "tailf-ncs:customers"
+resource "nso_netconf" "customer" {
+  path = "/tailf-ncs:customers"
   lists = [
     {
       name = "customer"
@@ -26,11 +26,8 @@ resource "nso_restconf" "customer" {
 
 # Define YANG leaf-list values
 
-resource "nso_restconf" "device_group" {
-  path = "tailf-ncs:devices/device-group=GROUP1"
-  attributes = {
-    name = "GROUP1"
-  }
+resource "nso_netconf" "device_group" {
+  path = "/tailf-ncs:devices/device-group[name='GROUP1']"
   lists = [
     {
       name   = "device-name"
@@ -41,8 +38,8 @@ resource "nso_restconf" "device_group" {
 
 # Define nested attributes in YANG containers
 
-resource "nso_restconf" "nested_attribute" {
-  path   = "tailf-ncs:devices"
+resource "nso_netconf" "nested_attribute" {
+  path   = "/tailf-ncs:devices"
   delete = false
   attributes = {
     "global-settings/connect-timeout" = 25

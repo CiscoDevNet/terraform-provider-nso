@@ -31,20 +31,43 @@ func TestAccDataSourceNsoDeviceGroup(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccDataSourceNsoDeviceGroupConfig,
+				Config: testAccDataSourceNsoDeviceGroupPrerequisitesConfig + testAccDataSourceNsoDeviceGroupConfig,
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("data.nso_device_group.test", "device_names.0", "ce0"),
+					resource.TestCheckResourceAttr("data.nso_device_group.test", "device_names.0", "tf-acc-dg-device"),
+					resource.TestCheckResourceAttr("data.nso_device_group.test", "location_name", "Building-1"),
+					resource.TestCheckResourceAttr("data.nso_device_group.test", "location_latitude", "37.338207"),
+					resource.TestCheckResourceAttr("data.nso_device_group.test", "location_longitude", "-121.88633"),
+					resource.TestCheckResourceAttr("data.nso_device_group.test", "location_altitude", "50"),
 				),
 			},
 		},
 	})
 }
 
+const testAccDataSourceNsoDeviceGroupPrerequisitesConfig = `
+resource "nso_netconf" "PreReq0" {
+	path = "/tailf-ncs:devices/device[name='tf-acc-dg-device']"
+	attributes = {
+		"name" = "tf-acc-dg-device"
+		"address" = "192.0.2.1"
+		"authgroup" = "default"
+		"state/admin-state" = "southbound-locked"
+		"device-type/cli/ned-id" = "cisco-ios-cli-6.115:cisco-ios-cli-6.115"
+	}
+}
+
+`
+
 const testAccDataSourceNsoDeviceGroupConfig = `
 
 resource "nso_device_group" "test" {
 	name = "test-group1"
-	device_names = ["ce0"]
+	device_names = ["tf-acc-dg-device"]
+	location_name = "Building-1"
+	location_latitude = "37.338207"
+	location_longitude = "-121.88633"
+	location_altitude = 50
+	depends_on = [nso_netconf.PreReq0, ]
 }
 
 data "nso_device_group" "test" {

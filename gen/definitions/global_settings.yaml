@@ -1,0 +1,365 @@
+---
+name: Global Settings
+path: /tailf-ncs:devices/global-settings
+res_description: This resource can manage the Global Settings configuration.
+ds_description: This data source can read the Global Settings configuration.
+no_augment_config: true
+no_delete: true
+doc_category: Device
+attributes:
+  - yang_name: connect-timeout
+    xpath: connect-timeout
+    tf_name: connect_timeout
+    type: Int64
+    description: Timeout in seconds for new connections.
+    min_int: 1
+    max_int: 4294967
+    example: 60
+  - yang_name: read-timeout
+    xpath: read-timeout
+    tf_name: read_timeout
+    type: Int64
+    description: Timeout in seconds used when reading data.
+    min_int: 1
+    max_int: 4294967
+    example: 120
+  - yang_name: write-timeout
+    xpath: write-timeout
+    tf_name: write_timeout
+    type: Int64
+    description: Timeout in seconds used when writing data.
+    min_int: 1
+    max_int: 4294967
+    example: 120
+  - yang_name: no-wait-for-lock
+    xpath: no-wait-for-lock
+    tf_name: no_wait_for_lock
+    type: Bool
+    exclusive_with: [wait_for_lock_timeout, wait_for_lock_infinity]
+    type_yang_bool: empty
+    description: Do not wait for the device lock, fail immediately.
+    example: false
+  - yang_name: wait-for-lock/timeout
+    xpath: wait-for-lock/timeout
+    tf_name: wait_for_lock_timeout
+    type: Int64
+    exclusive_with: [no_wait_for_lock, wait_for_lock_infinity]
+    description: Timeout in seconds to wait for device lock.
+    example: 60
+  - yang_name: wait-for-lock/infinity
+    xpath: wait-for-lock/infinity
+    tf_name: wait_for_lock_infinity
+    type: Bool
+    exclusive_with: [no_wait_for_lock, wait_for_lock_timeout]
+    type_yang_bool: empty
+    description: Wait indefinitely for the device lock.
+    example: false
+  - yang_name: ssh-keep-alive/interval
+    xpath: ssh-keep-alive/interval
+    tf_name: ssh_keep_alive_interval
+    type: Int64
+    description: The SSH keep alive interval in seconds.
+    example: 20
+  - yang_name: ssh-keep-alive/count
+    xpath: ssh-keep-alive/count
+    tf_name: ssh_keep_alive_count
+    type: Int64
+    description: The number of SSH keep alive messages before disconnect.
+    example: 3
+  - yang_name: ssh-algorithms/public-key
+    xpath: ssh-algorithms/public-key
+    tf_name: ssh_algorithms_public_key
+    type: StringList
+    description: A list of SSH public key algorithms.
+    example: ssh-rsa
+  - yang_name: ssh-algorithms/kex
+    xpath: ssh-algorithms/kex
+    tf_name: ssh_algorithms_kex
+    type: StringList
+    description: A list of SSH key exchange algorithms.
+    example: diffie-hellman-group14-sha1
+  - yang_name: ssh-algorithms/mac
+    xpath: ssh-algorithms/mac
+    tf_name: ssh_algorithms_mac
+    type: StringList
+    description: A list of SSH MAC algorithms.
+    example: hmac-sha2-256
+  - yang_name: ssh-algorithms/cipher
+    xpath: ssh-algorithms/cipher
+    tf_name: ssh_algorithms_cipher
+    type: StringList
+    description: A list of SSH cipher algorithms.
+    example: aes256-ctr
+  - yang_name: ssh-algorithms/compression
+    xpath: ssh-algorithms/compression
+    tf_name: ssh_algorithms_compression
+    type: StringList
+    description: A list of SSH compression algorithms.
+    example: none
+  - yang_name: ssh-algorithms/dh-group/min-size
+    xpath: ssh-algorithms/dh-group/min-size
+    tf_name: ssh_algorithms_dh_group_min_size
+    type: Int64
+    description: Minimum size of the DH group.
+    min_int: 1024
+    max_int: 8192
+    example: 1024
+  - yang_name: ssh-algorithms/dh-group/preferred-size
+    xpath: ssh-algorithms/dh-group/preferred-size
+    tf_name: ssh_algorithms_dh_group_preferred_size
+    type: Int64
+    description: Preferred size of the DH group.
+    min_int: 1024
+    max_int: 8192
+    example: 2048
+  - yang_name: ssh-algorithms/dh-group/max-size
+    xpath: ssh-algorithms/dh-group/max-size
+    tf_name: ssh_algorithms_dh_group_max_size
+    type: Int64
+    description: Maximum size of the DH group.
+    min_int: 1024
+    max_int: 8192
+    example: 4096
+  - yang_name: ned-keep-alive/interval
+    xpath: ned-keep-alive/interval
+    tf_name: ned_keep_alive_interval
+    type: Int64
+    description: The NED keep alive interval in seconds.
+    example: 120
+  - yang_name: ned-keep-alive/count
+    xpath: ned-keep-alive/count
+    tf_name: ned_keep_alive_count
+    type: Int64
+    description: The number of NED keep alive messages before disconnect.
+    example: 3
+  - yang_name: connect-retries/attempts
+    xpath: connect-retries/attempts
+    tf_name: connect_retries_attempts
+    type: Int64
+    description: Number of connection retry attempts.
+    example: 0
+  - yang_name: connect-retries/timeout
+    xpath: connect-retries/timeout
+    tf_name: connect_retries_timeout
+    type: Int64
+    description: Timeout in seconds between connection retry attempts.
+    example: 3
+  - yang_name: trace
+    xpath: trace
+    tf_name: trace
+    type: String
+    description: Trace output control.
+    enum_values:
+      - raw
+      - pretty
+      - "false"
+    example: "false"
+  - yang_name: trace-output
+    xpath: trace-output
+    tf_name: trace_output
+    type: String
+    description: Where to send trace output.
+    enum_values:
+      - file
+      - external
+    example: file
+  - yang_name: ned-settings/use-confirmed-commit
+    xpath: ned-settings/use-confirmed-commit
+    tf_name: ned_settings_use_confirmed_commit
+    type: Bool
+    type_yang_bool: boolean
+    description: Use confirmed commit toward the device.
+    example: false
+  - yang_name: ned-settings/use-validate
+    xpath: ned-settings/use-validate
+    tf_name: ned_settings_use_validate
+    type: Bool
+    type_yang_bool: boolean
+    description: Use validate toward the device.
+    example: false
+  - yang_name: ned-settings/use-startup
+    xpath: ned-settings/use-startup
+    tf_name: ned_settings_use_startup
+    type: Bool
+    type_yang_bool: boolean
+    description: Use startup datastore toward the device.
+    example: false
+  - yang_name: ned-settings/use-transaction-id
+    xpath: ned-settings/use-transaction-id
+    tf_name: ned_settings_use_transaction_id
+    type: Bool
+    type_yang_bool: boolean
+    description: Use transaction ID toward the device.
+    example: false
+  - yang_name: ned-settings/use-private-candidate
+    xpath: ned-settings/use-private-candidate
+    tf_name: ned_settings_use_private_candidate
+    type: Bool
+    type_yang_bool: boolean
+    description: Use private candidate datastore toward the device.
+    example: false
+  - yang_name: ned-settings/use-junos-rollback
+    xpath: ned-settings/use-junos-rollback
+    tf_name: ned_settings_use_junos_rollback
+    type: Bool
+    type_yang_bool: boolean
+    description: Use Junos rollback mechanism.
+    example: false
+  - yang_name: no-overwrite/enabled-by-default
+    xpath: no-overwrite/enabled-by-default
+    tf_name: no_overwrite_enabled_by_default
+    type: Bool
+    type_yang_bool: boolean
+    description: Enable no-overwrite by default.
+    example: true
+  - yang_name: no-overwrite/compare
+    xpath: no-overwrite/compare
+    tf_name: no_overwrite_compare
+    type: String
+    description: No-overwrite comparison method. Only valid when enabled_by_default is true.
+    enum_values:
+      - write-set-only
+      - write-and-full-read-set
+      - write-and-service-read-set
+    example: write-and-service-read-set
+  - yang_name: lsa/no-overwrite/enabled-by-default
+    xpath: lsa/no-overwrite/enabled-by-default
+    tf_name: lsa_no_overwrite_enabled_by_default
+    type: Bool
+    type_yang_bool: boolean
+    description: Enable LSA no-overwrite by default.
+    example: true
+  - yang_name: lsa/no-overwrite/compare
+    xpath: lsa/no-overwrite/compare
+    tf_name: lsa_no_overwrite_compare
+    type: String
+    description: LSA no-overwrite comparison method. Only valid when enabled_by_default is true.
+    enum_values:
+      - write-set-only
+      - write-and-full-read-set
+      - write-and-service-read-set
+    example: write-and-service-read-set
+  - yang_name: out-of-sync-commit-behaviour
+    xpath: out-of-sync-commit-behaviour
+    tf_name: out_of_sync_commit_behaviour
+    type: String
+    description: How to handle out-of-sync devices during commit.
+    enum_values:
+      - reject
+      - accept
+    example: reject
+  - yang_name: use-lsa
+    xpath: use-lsa
+    tf_name: use_lsa
+    type: Bool
+    exclusive_with: [no_lsa]
+    type_yang_bool: empty
+    description: Use LSA (Layered Service Architecture).
+    example: false
+  - yang_name: no-lsa
+    xpath: no-lsa
+    tf_name: no_lsa
+    type: Bool
+    exclusive_with: [use_lsa]
+    type_yang_bool: empty
+    description: Disable LSA.
+    example: false
+  - yang_name: session-limits/max-sessions
+    xpath: session-limits/max-sessions
+    tf_name: session_limits_max_sessions
+    type: String
+    description: Maximum number of concurrent sessions. A number, or unlimited.
+    example: "unlimited"
+  - yang_name: session-limits/connect-rate/burst
+    xpath: session-limits/connect-rate/burst
+    tf_name: session_limits_connect_rate_burst
+    type: String
+    description: Maximum burst of connections allowed. A number, or unlimited.
+    example: "unlimited"
+  - yang_name: session-limits/max-wait-time
+    xpath: session-limits/max-wait-time
+    tf_name: session_limits_max_wait_time
+    type: String
+    description: Maximum time in seconds to wait for a session. A number, or unlimited.
+    example: "10"
+  - yang_name: session-pool/max-sessions
+    xpath: session-pool/max-sessions
+    tf_name: session_pool_max_sessions
+    type: String
+    description: Maximum number of pooled sessions. A number, or unlimited.
+    example: "unlimited"
+  - yang_name: session-pool/idle-time
+    xpath: session-pool/idle-time
+    tf_name: session_pool_idle_time
+    type: Int64
+    description: Idle time in seconds before a pooled session is closed.
+    min_int: 1
+    max_int: 4294967
+    example: 30
+  - yang_name: session-pool/pool-max-sessions
+    xpath: session-pool/pool-max-sessions
+    tf_name: session_pool_pool_max_sessions
+    type: String
+    description: Maximum number of sessions in the connection pool. A number, or unlimited.
+    example: "200"
+  - yang_name: commit-queue/enabled-by-default
+    xpath: commit-queue/enabled-by-default
+    tf_name: commit_queue_enabled_by_default
+    type: Bool
+    type_yang_bool: boolean
+    description: Enable commit queue by default.
+    example: false
+  - yang_name: commit-queue/atomic
+    xpath: commit-queue/atomic
+    tf_name: commit_queue_atomic
+    type: Bool
+    type_yang_bool: boolean
+    description: Whether commit queue operations are atomic.
+    example: true
+  - yang_name: commit-queue/retry-attempts
+    xpath: commit-queue/retry-attempts
+    tf_name: commit_queue_retry_attempts
+    type: String
+    description: Number of commit queue retry attempts. A number, or unlimited.
+    example: "unlimited"
+  - yang_name: commit-queue/retry-timeout
+    xpath: commit-queue/retry-timeout
+    tf_name: commit_queue_retry_timeout
+    type: Int64
+    description: Timeout in seconds between commit queue retry attempts.
+    example: 30
+  - yang_name: commit-queue/error-option
+    xpath: commit-queue/error-option
+    tf_name: commit_queue_error_option
+    type: String
+    description: Commit queue error handling option.
+    enum_values:
+      - continue-on-error
+      - rollback-on-error
+      - stop-on-error
+    example: continue-on-error
+  - yang_name: commit-retries/attempts
+    xpath: commit-retries/attempts
+    tf_name: commit_retries_attempts
+    type: Int64
+    description: Number of commit retry attempts.
+    example: 0
+  - yang_name: commit-retries/timeout
+    xpath: commit-retries/timeout
+    tf_name: commit_retries_timeout
+    type: Int64
+    description: Timeout in seconds between commit retry attempts.
+    example: 3
+  - yang_name: trace-dir
+    xpath: trace-dir
+    tf_name: trace_dir
+    type: String
+    description: The directory for trace output files.
+    example: ./logs
+  - yang_name: report-multiple-errors
+    xpath: report-multiple-errors
+    tf_name: report_multiple_errors
+    type: Bool
+    type_yang_bool: boolean
+    description: Report multiple errors.
+    example: false

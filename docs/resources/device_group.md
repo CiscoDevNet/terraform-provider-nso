@@ -14,8 +14,12 @@ This resource can manage the Device Group configuration.
 
 ```terraform
 resource "nso_device_group" "example" {
-  name         = "test-group1"
-  device_names = ["ce0"]
+  name               = "test-group1"
+  device_names       = ["tf-acc-dg-device"]
+  location_name      = "Building-1"
+  location_latitude  = "37.338207"
+  location_longitude = "-121.88633"
+  location_altitude  = 50
 }
 ```
 
@@ -31,10 +35,14 @@ resource "nso_device_group" "example" {
 - `device_groups` (List of String) A list of device groups.
 - `device_names` (List of String) A list of device names.
 - `instance` (String) An instance name from the provider configuration.
+- `location_altitude` (Number) The altitude according to WGS-84, in meters.
+- `location_latitude` (String) The latitude according to WGS-84, in decimal degrees.
+- `location_longitude` (String) The longitude according to WGS-84, in decimal degrees.
+- `location_name` (String) An arbitrary name of the location.
 
 ### Read-Only
 
-- `id` (String) The RESTCONF path.
+- `id` (String) The XPath of the object.
 
 ## Import
 
@@ -43,5 +51,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import nso_device_group.example "tailf-ncs:devices/device-group=test-group1"
+terraform import nso_device_group.example "test-group1"
 ```

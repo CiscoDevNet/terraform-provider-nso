@@ -47,7 +47,7 @@ To compile the provider, run `go install`. This will build the provider and put 
 
 To generate or update documentation, run `go generate`.
 
-In order to run the full suite of Acceptance tests, run `make testacc`. Make sure the respective environment variables are set (e.g., `NSO_USERNAME`, `NSO_PASSWORD`, `NSO_URL`).
+In order to run the full suite of Acceptance tests, run `make testacc`. Make sure the respective environment variables are set (e.g., `NSO_USERNAME`, `NSO_PASSWORD`, `NSO_HOST`). The tests create their own objects (prefixed `tf-acc-` or `test-`) and remove them again; `nso_device_config` tests write to a southbound-locked device, so nothing is pushed to real devices.
 
 *Note:* Acceptance tests create real resources.
 
